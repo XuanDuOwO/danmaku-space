@@ -93,7 +93,10 @@ Future<UpdateCheckResult> checkForUpdate() async {
           for (final a in assets) {
             if (a is Map<String, dynamic> &&
                 '${a['name'] ?? ''}'.toLowerCase().endsWith('.apk')) {
-              apkUrl = '${a['browser_download_url'] ?? ''}';
+              // 用 API 资产地址而非浏览器地址：私有仓库的浏览器链接
+              // 不带登录态会 404，API 地址配合 Bearer 令牌可直接下载
+              // （Accept: application/octet-stream 时返回文件流）。
+              apkUrl = '${a['url'] ?? ''}';
               break;
             }
           }
@@ -201,9 +204,10 @@ Future<String> downloadApk(
   }
 
   final headers = <String, String>{'User-Agent': 'Mozilla/5.0'};
-  // 私有 GitHub 仓库的资产下载需要令牌
-  if (info.url.contains('github.com') && kGithubToken.isNotEmpty) {
+  // 私有 GitHub 仓库的资产走 API 地址 + 令牌 + octet-stream
+  if (info.url.contains('api.github.com') && kGithubToken.isNotEmpty) {
     headers['Authorization'] = 'Bearer $kGithubToken';
+    headers['Accept'] = 'application/octet-stream';
   }
   final client = http.Client();
   try {

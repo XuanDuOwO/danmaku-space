@@ -1,0 +1,71 @@
+name: Release APK
+
+# 推送 v* 标签即自动：构建 APK → 创建/更新 GitHub Release 并上传 APK → 部署到更新服务器
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build APK
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: Prepare named artifacts
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          cp build/app/outputs/flutter-apk/app-release.apk "danmaku-space-${GITHUB_REF_NAME}.apk"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: danmaku-space-*.apk
+          overwrite_files: true
+
+      - name: Build update.json for update server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq '.body')
+          python3 - "$VER" "$NOTES" <<'PY'
+          import json, sys
+          ver, notes = sys.argv[1], sys.argv[2]
+          meta = {
+              'version': ver,
+              'url': 'http://47.102.106.125:18080/update/apk',
+              'notes': notes.strip() or f'弹幕空间 v{ver}',
+          }
+          open('update.json', 'w', encoding='utf-8').write(json.dumps(meta, ensure_ascii=False))
+          PY
+          cat update.json
+
+      - name: Deploy to update server
+        env:
+          SSH_PASSWORD: ${{ secrets.QY_SSH_PASSWORD }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          cp build/app/outputs/flutter-apk/app-release.apk update.apk
+          sshpass -p "$SSH_PASSWORD" scp -o StrictHostKeyChecking=no update.json update.apk root@47.102.106.125:/opt/qyauth/
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no root@47.102.106.125 \
+            'curl -s http://127.0.0.1:18080/update/latest; echo'
