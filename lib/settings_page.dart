@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'anim.dart';
@@ -157,6 +159,53 @@ class _SettingsTabState extends State<SettingsTab> {
 
   bool _checking = false;
 
+  /// 应用内下载新版本 APK（带进度条），完成后直接拉起系统安装器。
+  Future<void> _downloadAndInstall(UpdateInfo info) async {
+    final progress = ValueNotifier<double?>(null); // null = 连接中
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: Text('正在下载 v${info.version}'),
+          content: ValueListenableBuilder<double?>(
+            valueListenable: progress,
+            builder: (_, p, __) => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LinearProgressIndicator(value: p),
+                const SizedBox(height: 10),
+                Text(
+                  p == null ? '正在连接…' : '${(p * 100).toStringAsFixed(0)}%',
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    try {
+      final path = await downloadApk(
+        info,
+        onProgress: (p) => progress.value = p,
+      );
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      await installApk(path);
+    } catch (e) {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          duration: const Duration(seconds: 3),
+          content: Text('下载失败：$e'),
+        ));
+      }
+    }
+  }
+
   /// 检测更新：GitHub 优先，其次自建服务器；发现新版本弹窗让用户选择去更新。
   Future<void> _checkUpdate() async {
     setState(() => _checking = true);
@@ -191,9 +240,9 @@ class _SettingsTabState extends State<SettingsTab> {
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                openInBrowser(info.url);
+                _downloadAndInstall(info);
               },
-              child: const Text('去更新'),
+              child: const Text('立即更新'),
             ),
           ],
         ),

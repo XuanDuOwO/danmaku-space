@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -169,7 +170,7 @@ List<int> _verParts(String v) {
 const MethodChannel _openUrlChannel =
     MethodChannel('cn.local.bili_live_relay/open_url');
 
-/// 用系统浏览器打开下载页（手动更新：下载 APK → 安装）。
+/// 用系统浏览器打开下载页（备用手段：应用内下载失败时可退回）。
 Future<void> openInBrowser(String url) async {
   if (url.isEmpty) return;
   try {
@@ -178,4 +179,67 @@ Future<void> openInBrowser(String url) async {
     // 打不开就退回复制链接，由用户自己粘贴到浏览器。
     await Clipboard.setData(ClipboardData(text: url));
   }
+}
+
+/// 应用专属更新目录（getExternalFilesDir/update），无需存储权限。
+Future<String> _updateDir() async {
+  return await _openUrlChannel.invokeMethod<String>('getUpdateDir') ?? '';
+}
+
+/// 应用内下载 APK 到更新目录，[onProgress] 回调 0~1。
+/// 下载完成后返回本地文件路径，交给 [installApk] 拉起安装。
+Future<String> downloadApk(
+  UpdateInfo info, {
+  void Function(double progress)? onProgress,
+}) async {
+  final dir = await _updateDir();
+  if (dir.isEmpty) throw Exception('无法获取更新目录');
+  final file = File('$dir/danmaku-space-${info.version}.apk');
+  if (await file.exists()) {
+    // 之前下过同一个版本：直接复用，秒进安装。
+    return file.path;
+  }
+
+  final headers = <String, String>{'User-Agent': 'Mozilla/5.0'};
+  // 私有 GitHub 仓库的资产下载需要令牌
+  if (info.url.contains('github.com') && kGithubToken.isNotEmpty) {
+    headers['Authorization'] = 'Bearer $kGithubToken';
+  }
+  final client = http.Client();
+  try {
+    final req = http.Request('GET', Uri.parse(info.url))..headers.addAll(headers);
+    final resp = await client.send(req).timeout(const Duration(seconds: 20));
+    if (resp.statusCode != 200) {
+      throw Exception('下载失败（HTTP ${resp.statusCode}）');
+    }
+    final total = resp.contentLength ?? 0;
+    var received = 0;
+    final sink = file.openWrite();
+    try {
+      await for (final chunk in resp.stream) {
+        received += chunk.length;
+        sink.add(chunk);
+        if (total > 0) onProgress?.call(received / total);
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+    if (total > 0 && received != total) {
+      throw Exception('下载不完整（$received / $total）');
+    }
+    onProgress?.call(1.0);
+    return file.path;
+  } catch (_) {
+    // 下载中断就删掉半截文件，避免下次误用
+    if (await file.exists()) await file.delete();
+    rethrow;
+  } finally {
+    client.close();
+  }
+}
+
+/// 拉起系统安装器安装已下载的 APK。
+Future<void> installApk(String path) async {
+  await _openUrlChannel.invokeMethod('installApk', {'path': path});
 }
