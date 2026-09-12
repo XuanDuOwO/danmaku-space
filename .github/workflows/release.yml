@@ -25,6 +25,15 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Restore signing keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          # 用固定的本机签名库，保证各次构建/云端构建签名一致，
+          # 用户可直接覆盖升级（否则签名不同会安装失败 -7）
+          mkdir -p ~/.android
+          echo "$KS_B64" | base64 -d > ~/.android/debug.keystore
+
       - name: Build APK
         run: |
           flutter pub get
