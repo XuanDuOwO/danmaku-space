@@ -62,7 +62,7 @@ const String kGithubToken =
 const String kServerUpdateUrl = 'http://47.102.106.125:18080/update/latest';
 
 /// 本 App 当前版本号（与 pubspec.yaml 的 version 保持一致）。
-const String kAppVersion = '1.0.6';
+const String kAppVersion = '1.0.7';
 
 // ========================================================================
 

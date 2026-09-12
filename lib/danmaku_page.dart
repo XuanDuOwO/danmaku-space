@@ -86,6 +86,18 @@ class _DanmakuTabState extends State<DanmakuTab> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final fs = _c.danmakuFullscreen;
+    // 全屏时挖孔摄像头会遮挡内容：竖屏整体下移 2 个标题高度（左右不变），
+    // 横屏弹幕起始位置右移 1 个标题宽度（上下不变）；取系统实际挖孔避让与
+    // 固定偏移的较大值，两种挖孔位置都能盖住。
+    EdgeInsets fsPad = EdgeInsets.zero;
+    if (fs) {
+      const unit = 48.0; // 一个「大标题」高度/宽度基准
+      final mq = MediaQuery.of(context);
+      final landscape = mq.orientation == Orientation.landscape;
+      fsPad = landscape
+          ? EdgeInsets.only(left: mq.viewPadding.left > unit ? mq.viewPadding.left : unit)
+          : EdgeInsets.only(top: mq.viewPadding.top > unit * 2 ? mq.viewPadding.top : unit * 2);
+    }
     return Scaffold(
       // 全屏模式：隐藏「弹幕空间」标题栏，只留直播间信息条和弹幕列表
       appBar: fs
@@ -107,13 +119,16 @@ class _DanmakuTabState extends State<DanmakuTab> {
                 ),
               ],
             ),
-      body: Column(
-        children: [
-          _buildTopBar(cs),
-          _buildEnterTicker(cs),
-          const Divider(height: 1),
-          Expanded(child: _buildList(cs)),
-        ],
+      body: Padding(
+        padding: fsPad,
+        child: Column(
+          children: [
+            _buildTopBar(cs),
+            _buildEnterTicker(cs),
+            const Divider(height: 1),
+            Expanded(child: _buildList(cs)),
+          ],
+        ),
       ),
     );
   }
