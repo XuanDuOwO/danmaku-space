@@ -1,0 +1,2 @@
+IS_ADMIN=False
+REG_EXCL_OK
