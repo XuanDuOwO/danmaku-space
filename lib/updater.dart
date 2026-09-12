@@ -54,8 +54,8 @@ const String kGithubRepo = 'XuanDuOwO/danmaku-space';
 const String kGithubToken =
     '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';
 
-/// 自建更新服务地址。
-const String kServerUpdateUrl = 'http://47.102.106.125:18888/update/latest';
+/// 自建更新服务地址（qyauth 实际监听 18080）。
+const String kServerUpdateUrl = 'http://47.102.106.125:18080/update/latest';
 
 /// 本 App 当前版本号（与 pubspec.yaml 的 version 保持一致）。
 const String kAppVersion = '1.0.1';
