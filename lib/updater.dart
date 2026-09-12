@@ -35,14 +35,17 @@ class UpdateInfo {
   });
 }
 
-/// 检测结果：update 为 null 时看 reached 判断是「已是最新」还是「网络不通」。
+/// 检测结果：candidates 是**所有**有新版本的源（按优先级排好序），
+/// 下载时逐个尝试，任一成功即用 —— 两个源完全等价、自动互备。
 class UpdateCheckResult {
-  final UpdateInfo? update;
+  final List<UpdateInfo> candidates;
 
   /// 是否至少有一个更新源连通（否则视为网络失败）。
   final bool reached;
 
-  const UpdateCheckResult({required this.update, required this.reached});
+  const UpdateCheckResult({required this.candidates, required this.reached});
+
+  UpdateInfo? get update => candidates.isEmpty ? null : candidates.first;
 }
 
 // ======================= 发布配置（发新版时改这里） =======================
@@ -63,9 +66,11 @@ const String kAppVersion = '1.0.2';
 
 // ========================================================================
 
-/// 检测更新：GitHub 优先，其次自建服务器。
+/// 检测更新：两个源都查一遍，收集所有有新版本的候选（GitHub 优先）。
+/// 任一源失败不影响另一个；下载阶段再按候选顺序逐个尝试。
 Future<UpdateCheckResult> checkForUpdate() async {
   var reached = false;
+  final candidates = <UpdateInfo>[];
 
   // 1) GitHub Releases（私有仓库需带令牌）
   if (kGithubRepo.isNotEmpty) {
@@ -101,20 +106,17 @@ Future<UpdateCheckResult> checkForUpdate() async {
             }
           }
           if (ver.isNotEmpty && apkUrl.isNotEmpty && isNewer(ver)) {
-            return UpdateCheckResult(
-              reached: true,
-              update: UpdateInfo(
-                version: ver,
-                url: apkUrl,
-                notes: '${j['body'] ?? ''}'.trim(),
-                source: 'GitHub',
-              ),
-            );
+            candidates.add(UpdateInfo(
+              version: ver,
+              url: apkUrl,
+              notes: '${j['body'] ?? ''}'.trim(),
+              source: 'GitHub',
+            ));
           }
         }
       }
     } catch (_) {
-      // GitHub 不通（网络/仓库未建）→ 继续查服务器
+      // GitHub 不通（网络/仓库未建）→ 用服务器
     }
   }
 
@@ -130,16 +132,14 @@ Future<UpdateCheckResult> checkForUpdate() async {
       if (j is Map<String, dynamic>) {
         final ver = '${j['version'] ?? ''}'.trim();
         final url = '${j['url'] ?? ''}'.trim();
-        if (ver.isNotEmpty && url.isNotEmpty && isNewer(ver)) {
-          return UpdateCheckResult(
-            reached: true,
-            update: UpdateInfo(
-              version: ver,
-              url: url,
-              notes: '${j['notes'] ?? ''}'.trim(),
-              source: '服务器',
-            ),
-          );
+        final dup = candidates.any((c) => c.version == ver && c.url == url);
+        if (ver.isNotEmpty && url.isNotEmpty && !dup && isNewer(ver)) {
+          candidates.add(UpdateInfo(
+            version: ver,
+            url: url,
+            notes: '${j['notes'] ?? ''}'.trim(),
+            source: '服务器',
+          ));
         }
       }
     }
@@ -147,7 +147,7 @@ Future<UpdateCheckResult> checkForUpdate() async {
     // 服务器不通
   }
 
-  return UpdateCheckResult(update: null, reached: reached);
+  return UpdateCheckResult(candidates: candidates, reached: reached);
 }
 
 /// 语义化比较：remote 是否比 kAppVersion 新（按数值逐段比较，如 1.2.10 > 1.2.9）。

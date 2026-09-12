@@ -160,7 +160,9 @@ class _SettingsTabState extends State<SettingsTab> {
   bool _checking = false;
 
   /// 应用内下载新版本 APK（带进度条），完成后直接拉起系统安装器。
-  Future<void> _downloadAndInstall(UpdateInfo info) async {
+  /// [candidates] 按优先级排列：任一源下载失败自动换下一个源重试。
+  Future<void> _downloadAndInstall(List<UpdateInfo> candidates) async {
+    if (candidates.isEmpty) return;
     final progress = ValueNotifier<double?>(null); // null = 连接中
     unawaited(showDialog<void>(
       context: context,
@@ -168,7 +170,7 @@ class _SettingsTabState extends State<SettingsTab> {
       builder: (ctx) => PopScope(
         canPop: false,
         child: AlertDialog(
-          title: Text('正在下载 v${info.version}'),
+          title: Text('正在下载 v${candidates.first.version}'),
           content: ValueListenableBuilder<double?>(
             valueListenable: progress,
             builder: (_, p, __) => Column(
@@ -188,21 +190,36 @@ class _SettingsTabState extends State<SettingsTab> {
       ),
     ));
 
-    try {
-      final path = await downloadApk(
-        info,
-        onProgress: (p) => progress.value = p,
-      );
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      await installApk(path);
-    } catch (e) {
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          duration: const Duration(seconds: 3),
-          content: Text('下载失败：$e'),
-        ));
+    Object? lastErr;
+    String? apkPath;
+    for (final info in candidates) {
+      try {
+        progress.value = null; // 换源重新计数
+        apkPath = await downloadApk(
+          info,
+          onProgress: (p) => progress.value = p,
+        );
+        break;
+      } catch (e) {
+        lastErr = e; // 该源失败 → 自动换下一个
       }
+    }
+
+    try {
+      if (apkPath != null) {
+        if (mounted) Navigator.of(context, rootNavigator: true).pop();
+        await installApk(apkPath);
+      } else {
+        if (mounted) Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            duration: const Duration(seconds: 3),
+            content: Text('下载失败（所有更新源都试过）：$lastErr'),
+          ));
+        }
+      }
+    } finally {
+      progress.dispose();
     }
   }
 
@@ -240,7 +257,7 @@ class _SettingsTabState extends State<SettingsTab> {
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                _downloadAndInstall(info);
+                _downloadAndInstall(result.candidates);
               },
               child: const Text('立即更新'),
             ),
