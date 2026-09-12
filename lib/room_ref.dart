@@ -67,13 +67,17 @@ Future<int?> parseRoomInput(String input) async {
   return _extractRoomId(uri);
 }
 
-/// 从直播页 HTML 里抠房间号（b23.tv 直接吐页面时的兜底）。
+/// 从直播页 / 活动页 HTML 里抠房间号（b23.tv 直接吐页面时的兜底）。
+/// 兼容两种形态：直播页 `"room_id":7734200`（数字）、
+/// 赛事活动页 `"roomsConfig":[{"roomId":"7734200"}]`（字符串）。
 int? _roomIdFromBody(String body) {
   if (body.isEmpty) return null;
   final patterns = [
     RegExp(r'"room_id"\s*:\s*(\d{1,12})'),
     RegExp(r'live\.bilibili\.com/(\d{1,12})'),
     RegExp(r'"roomId"\s*:\s*(\d{1,12})'),
+    RegExp(r'"roomId"\s*:\s*"(\d{1,12})"'),
+    RegExp(r'"room_id"\s*:\s*"(\d{1,12})"'),
     RegExp(r'roomid=(\d{1,12})'),
   ];
   for (final p in patterns) {
@@ -82,6 +86,13 @@ int? _roomIdFromBody(String body) {
       final v = int.tryParse(m.group(1)!);
       if (v != null && v > 0) return v;
     }
+  }
+  // 赛事活动页：roomsConfig 列表的第一个就是分享者指向的直播间
+  final rc = RegExp(r'"roomsConfig"\s*:\s*\[\s*\{\s*"roomId"\s*:\s*"(\d{1,12})"')
+      .firstMatch(body);
+  if (rc != null) {
+    final v = int.tryParse(rc.group(1)!);
+    if (v != null && v > 0) return v;
   }
   return null;
 }
