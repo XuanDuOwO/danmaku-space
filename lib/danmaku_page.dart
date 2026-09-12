@@ -367,6 +367,34 @@ class _DanmakuTabState extends State<DanmakuTab> {
     );
   }
 
+  /// 用户标签小徽章（房管/年度/VIP/粉丝勋章/UL）。
+  /// filled=true 实底白字，false 淡底描边同色字。
+  WidgetSpan _tagSpan(String text, Color color, {bool filled = false}) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Container(
+        margin: const EdgeInsets.only(right: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
+        decoration: BoxDecoration(
+          color: filled ? color : color.withValues(alpha: .14),
+          borderRadius: BorderRadius.circular(4),
+          border: filled
+              ? null
+              : Border.all(color: color.withValues(alpha: .45), width: .5),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 9.5,
+            height: 1.25,
+            fontWeight: FontWeight.w600,
+            color: filled ? Colors.white : color,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildRow(ColorScheme cs, LiveEvent e) {
     final (Color color, IconData icon) = switch (e.kind) {
       EventKind.gift => (const Color(0xFFE3B341), Icons.card_giftcard),
@@ -382,45 +410,26 @@ class _DanmakuTabState extends State<DanmakuTab> {
         : null;
     final prefix = <InlineSpan>[];
     if (e.user.admin) {
-      prefix.add(const TextSpan(
-        text: '房管 ',
-        style: TextStyle(
-            color: Color(0xFFF85149),
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700),
-      ));
+      prefix.add(_tagSpan('房管', const Color(0xFFF85149), filled: true));
     } else if (e.user.svip) {
-      prefix.add(const TextSpan(
-        text: '年度 ',
-        style: TextStyle(
-            color: Color(0xFFE3B341),
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700),
-      ));
+      prefix.add(_tagSpan('年度', const Color(0xFFE3B341), filled: true));
     } else if (e.user.vip) {
-      prefix.add(const TextSpan(
-        text: 'VIP ',
-        style: TextStyle(
-            color: Color(0xFFF778BA),
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700),
-      ));
+      prefix.add(_tagSpan('VIP', const Color(0xFFF778BA), filled: true));
     }
     if (e.user.hasMedal) {
-      prefix.add(TextSpan(
-        text: '${e.user.medalName}${e.user.medalLevel} ',
-        style: const TextStyle(
-          color: Color(0xFFFFD659),
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-        ),
-      ));
+      // 粉丝勋章：按等级给 B 站风格的勋章底色
+      final lv = e.user.medalLevel;
+      final medalColor = lv >= 10
+          ? const Color(0xFFE3B341)
+          : lv >= 7
+              ? const Color(0xFFA371F7)
+              : lv >= 4
+                  ? const Color(0xFF3EC2A6)
+                  : const Color(0xFF4FA0E0);
+      prefix.add(_tagSpan('${e.user.medalName} $lv', medalColor, filled: true));
     }
     if (e.user.level > 0) {
-      prefix.add(TextSpan(
-        text: 'UL${e.user.level} ',
-        style: const TextStyle(color: Color(0xFF6E7681), fontSize: 11),
-      ));
+      prefix.add(_tagSpan('UL${e.user.level}', const Color(0xFF6E7681)));
     }
     if (e.user.name.isNotEmpty) {
       prefix.add(TextSpan(

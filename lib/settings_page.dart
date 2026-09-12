@@ -159,6 +159,57 @@ class _SettingsTabState extends State<SettingsTab> {
 
   bool _checking = false;
 
+  /// 把更新说明解析成「新特性」逐条列表（兼容 GitHub 的 - 列表、
+  /// 服务器 json 的换行 / 中文分号分隔）。
+  List<Widget> _notesLines(String notes) {
+    if (notes.trim().isEmpty) return const [];
+    final lines = notes
+        .split(RegExp(r'[\n;；]+'))
+        .map((l) => l.trim().replaceFirst(RegExp(r'^[-*•·]\s*'), '').trim())
+        .where((l) => l.isNotEmpty && l != '-' && l != '*')
+        .take(10)
+        .toList();
+    if (lines.isEmpty) return const [];
+    return [
+      const SizedBox(height: 8),
+      const Text('新版本特性', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 4),
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final l in lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(top: 6, right: 6),
+                        width: 5,
+                        height: 5,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF4D9FFF),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(l,
+                            style:
+                                const TextStyle(fontSize: 12.5, height: 1.45)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
   /// 应用内下载新版本 APK（带进度条），完成后直接拉起系统安装器。
   /// [candidates] 按优先级排列：任一源下载失败自动换下一个源重试。
   Future<void> _downloadAndInstall(List<UpdateInfo> candidates) async {
@@ -242,11 +293,7 @@ class _SettingsTabState extends State<SettingsTab> {
             children: [
               Text('来源：${info.source} · 当前 v$kAppVersion',
                   style: const TextStyle(fontSize: 12)),
-              if (info.notes.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(info.notes,
-                    style: const TextStyle(fontSize: 12.5, height: 1.5)),
-              ],
+              ..._notesLines(info.notes),
             ],
           ),
           actions: [

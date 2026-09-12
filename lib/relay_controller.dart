@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'blive/api.dart';
 import 'blive/client.dart';
@@ -59,12 +60,16 @@ class RelayController extends ChangeNotifier {
   final ValueNotifier<int> logRevision = ValueNotifier<int>(0);
 
   /// 弹幕空间全屏模式：隐藏页面标题与底部导航，只留直播间信息条和弹幕。
-  /// 返回键 / 信息条上的退出按钮可退出。
+  /// 同时切沉浸式（收起刘海状态栏/手势条，下拉可临时唤出），返回键退出。
   bool danmakuFullscreen = false;
 
   void setDanmakuFullscreen(bool v) {
     if (danmakuFullscreen == v) return;
     danmakuFullscreen = v;
+    // 全屏：状态栏/导航条收起（sticky，滑一下会临时出现后自动隐藏）
+    SystemChrome.setEnabledSystemUIMode(
+      v ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+    );
     notifyListeners();
   }
 
@@ -163,6 +168,12 @@ class RelayController extends ChangeNotifier {
         info = client.info;
         _syncFavName();
         unawaited(_touchRecentWithInfo());
+        // 连接建立：拉起前台服务，切后台不被系统杀掉
+        _startKeepAlive();
+      }
+      if (s == ConnState.idle || s == ConnState.error) {
+        // 连接断开/异常：先撤下保活，重连成功会再次拉起
+        _stopKeepAlive();
       }
       if (s == ConnState.error && client.lastError.isNotEmpty) {
         error = client.lastError;
@@ -198,6 +209,23 @@ class RelayController extends ChangeNotifier {
     _stateSub = null;
     _client?.stop();
     _client = null;
+    _stopKeepAlive();
+  }
+
+  // ------------------------------------------------------- 前台保活服务
+
+  static const _keepAliveChannel =
+      MethodChannel('cn.local.bili_live_relay/open_url');
+
+  /// 拉起前台服务：把进程提到前台优先级，切后台/锁屏时弹幕连接不被杀。
+  void _startKeepAlive() {
+    _keepAliveChannel
+        .invokeMethod('startKeepAlive', {'room': '$roomId'})
+        .catchError((_) {});
+  }
+
+  void _stopKeepAlive() {
+    _keepAliveChannel.invokeMethod('stopKeepAlive').catchError((_) {});
   }
 
   void _pushEnter(String text) {
@@ -405,6 +433,8 @@ class RelayController extends ChangeNotifier {
   void dispose() {
     _enterTimer?.cancel();
     _flushTimer?.cancel();
+    // 保险：退出应用壳时恢复系统 UI
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     unawaited(_flush());
     unawaited(_teardown());
     _api?.dispose();

@@ -208,7 +208,8 @@ class _PortalTabState extends State<PortalTab> {
                 ),
                 const SizedBox(height: 8),
                 _entryTile(
-                  icon: Icons.bolt,
+                  // 与弹幕空间页的技播图标保持一致
+                  icon: Icons.offline_bolt,
                   color: _techColor,
                   title: '我的技播',
                   count: c.favsOf('tech').length,

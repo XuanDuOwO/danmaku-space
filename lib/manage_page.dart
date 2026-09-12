@@ -229,7 +229,9 @@ class _ManagePageState extends State<ManagePage>
                     IconButton(
                       tooltip: f.type == 'love' ? '标为技播' : '标为爱播',
                       icon: Icon(
-                        f.type == 'love' ? Icons.favorite : Icons.bolt,
+                        f.type == 'love'
+                            ? Icons.favorite
+                            : Icons.offline_bolt,
                         size: 18,
                         color: color,
                       ),
