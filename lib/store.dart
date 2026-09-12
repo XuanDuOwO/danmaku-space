@@ -134,6 +134,8 @@ class Store {
   static const _kSeq = 'log_seq';
   static const _kRecent = 'recent_rooms';
   static const _kEmojiOrder = 'emoji_room_order';
+  static const _kFsTopOffset = 'fs_top_offset';
+  static const _kFsLeftOffset = 'fs_left_offset';
   static const _logPrefix = 'dlog_';
   static const _emojiPrefix = 'etab_';
 
@@ -372,6 +374,20 @@ class Store {
     for (final d in days.sublist(logKeepDays)) {
       await p.remove('$_logPrefix$d');
     }
+  }
+
+  // ------------------------------------------------- 全屏挖孔避让偏移（手动可调）
+
+  /// 竖屏全屏：直播间信息条顶部避让偏移；横屏全屏：弹幕起始左侧偏移。
+  static Future<double> loadFsOffset({required bool landscape}) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getDouble(landscape ? _kFsLeftOffset : _kFsTopOffset) ??
+        (landscape ? 48.0 : 96.0);
+  }
+
+  static Future<void> saveFsOffset(double v, {required bool landscape}) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setDouble(landscape ? _kFsLeftOffset : _kFsTopOffset, v);
   }
 
   // ------------------------------------------------------------ 房间表情表

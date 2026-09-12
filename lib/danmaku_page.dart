@@ -23,12 +23,23 @@ class _DanmakuTabState extends State<DanmakuTab> {
   final ScrollController _scroll = ScrollController();
   int _lastCount = 0;
 
+  /// 全屏挖孔避让偏移（竖屏=顶部下移 / 横屏=左侧右移），可在全屏时手动拖动调节
+  double _fsTop = 96;
+  double _fsLeft = 48;
+
   RelayController get _c => widget.controller;
 
   @override
   void initState() {
     super.initState();
     _c.addListener(_onChanged);
+    _loadFsOffsets();
+  }
+
+  Future<void> _loadFsOffsets() async {
+    _fsTop = await Store.loadFsOffset(landscape: false);
+    _fsLeft = await Store.loadFsOffset(landscape: true);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -91,12 +102,11 @@ class _DanmakuTabState extends State<DanmakuTab> {
     // 固定偏移的较大值，两种挖孔位置都能盖住。
     EdgeInsets fsPad = EdgeInsets.zero;
     if (fs) {
-      const unit = 48.0; // 一个「大标题」高度/宽度基准
       final mq = MediaQuery.of(context);
       final landscape = mq.orientation == Orientation.landscape;
       fsPad = landscape
-          ? EdgeInsets.only(left: mq.viewPadding.left > unit ? mq.viewPadding.left : unit)
-          : EdgeInsets.only(top: mq.viewPadding.top > unit * 2 ? mq.viewPadding.top : unit * 2);
+          ? EdgeInsets.only(left: mq.viewPadding.left > _fsLeft ? mq.viewPadding.left : _fsLeft)
+          : EdgeInsets.only(top: mq.viewPadding.top > _fsTop ? mq.viewPadding.top : _fsTop);
     }
     return Scaffold(
       // 全屏模式：隐藏「弹幕空间」标题栏，只留直播间信息条和弹幕列表
@@ -123,7 +133,32 @@ class _DanmakuTabState extends State<DanmakuTab> {
         padding: fsPad,
         child: Column(
           children: [
-            _buildTopBar(cs),
+            // 全屏时按住信息条拖动：竖屏上下调、横屏左右调挖孔避让距离，松手记住
+            if (fs)
+              Builder(builder: (context) {
+                final landscape =
+                    MediaQuery.of(context).orientation == Orientation.landscape;
+                return GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onVerticalDragUpdate: landscape
+                      ? null
+                      : (d) => setState(() =>
+                          _fsTop = (_fsTop + d.delta.dy).clamp(0.0, 400.0)),
+                  onVerticalDragEnd: landscape
+                      ? null
+                      : (_) => Store.saveFsOffset(_fsTop, landscape: false),
+                  onHorizontalDragUpdate: landscape
+                      ? (d) => setState(() =>
+                          _fsLeft = (_fsLeft + d.delta.dx).clamp(0.0, 400.0))
+                      : null,
+                  onHorizontalDragEnd: landscape
+                      ? (_) => Store.saveFsOffset(_fsLeft, landscape: true)
+                      : null,
+                  child: _buildTopBar(cs),
+                );
+              })
+            else
+              _buildTopBar(cs),
             _buildEnterTicker(cs),
             const Divider(height: 1),
             Expanded(child: _buildList(cs)),
