@@ -6,6 +6,7 @@ import 'blive/normalize.dart';
 import 'emoji_text.dart';
 import 'manage_page.dart';
 import 'relay_controller.dart';
+import 'store.dart';
 
 /// 弹幕空间（模块二）：当前房间的实时弹幕。
 /// 只承载「直播间信息 + 收藏图标 + 进场提示 + 弹幕列表」，
