@@ -260,6 +260,10 @@ class _SettingsTabState extends State<SettingsTab> {
       if (apkPath != null) {
         if (mounted) Navigator.of(context, rootNavigator: true).pop();
         await installApk(apkPath);
+        // 无论安装成功与否，2 分钟后自动清掉安装包
+        unawaited(Future.delayed(const Duration(minutes: 2), () {
+          return cleanUpdateApks();
+        }));
       } else {
         if (mounted) Navigator.of(context, rootNavigator: true).pop();
         if (mounted) {

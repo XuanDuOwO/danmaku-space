@@ -62,7 +62,7 @@ const String kGithubToken =
 const String kServerUpdateUrl = 'http://47.102.106.125:18080/update/latest';
 
 /// 本 App 当前版本号（与 pubspec.yaml 的 version 保持一致）。
-const String kAppVersion = '1.0.3';
+const String kAppVersion = '1.0.4';
 
 // ========================================================================
 
@@ -191,6 +191,12 @@ Future<String> _updateDir() async {
 
 /// 应用内下载 APK 到更新目录，[onProgress] 回调 0~1。
 /// 下载完成后返回本地文件路径，交给 [installApk] 拉起安装。
+///
+/// 可靠性设计：
+///   - 先写 `*.part` 半成品文件，下载完成校验后才改名成正式文件 ——
+///     中途退出/断网留下的残件绝不会被当成完整包去安装；
+///   - 数据流 5 秒无新数据即超时中断（上层自动换下一个源重试）——
+///     只对"建立连接"设超时的话，源挂起时会永远卡在 0%。
 Future<String> downloadApk(
   UpdateInfo info, {
   void Function(double progress)? onProgress,
@@ -198,10 +204,13 @@ Future<String> downloadApk(
   final dir = await _updateDir();
   if (dir.isEmpty) throw Exception('无法获取更新目录');
   final file = File('$dir/danmaku-space-${info.version}.apk');
+  final partFile = File('${file.path}.part');
+  // 只信任下载完成后改名的完整文件；<1MB 的异常文件直接重下
   if (await file.exists()) {
-    // 之前下过同一个版本：直接复用，秒进安装。
-    return file.path;
+    if (await file.length() > 1024 * 1024) return file.path;
+    await file.delete();
   }
+  if (await partFile.exists()) await partFile.delete();
 
   final headers = <String, String>{'User-Agent': 'Mozilla/5.0'};
   // 私有 GitHub 仓库的资产走 API 地址 + 令牌 + octet-stream
@@ -212,31 +221,35 @@ Future<String> downloadApk(
   final client = http.Client();
   try {
     final req = http.Request('GET', Uri.parse(info.url))..headers.addAll(headers);
-    final resp = await client.send(req).timeout(const Duration(seconds: 20));
+    final resp = await client.send(req).timeout(const Duration(seconds: 5));
     if (resp.statusCode != 200) {
       throw Exception('下载失败（HTTP ${resp.statusCode}）');
     }
     final total = resp.contentLength ?? 0;
     var received = 0;
-    final sink = file.openWrite();
+    final sink = partFile.openWrite();
     try {
-      await for (final chunk in resp.stream) {
+      // 数据流空转 20 秒即超时报错 → 上层自动换源重试
+      await for (final chunk in resp.stream.timeout(const Duration(seconds: 5))) {
         received += chunk.length;
         sink.add(chunk);
         if (total > 0) onProgress?.call(received / total);
       }
-    } finally {
       await sink.flush();
       await sink.close();
+    } catch (e) {
+      await sink.close().catchError((_) {});
+      rethrow;
     }
     if (total > 0 && received != total) {
       throw Exception('下载不完整（$received / $total）');
     }
+    await partFile.rename(file.path); // 完整才转正
     onProgress?.call(1.0);
     return file.path;
   } catch (_) {
-    // 下载中断就删掉半截文件，避免下次误用
-    if (await file.exists()) await file.delete();
+    // 下载中断就删掉半成品，避免残留
+    if (await partFile.exists()) await partFile.delete();
     rethrow;
   } finally {
     client.close();
@@ -246,4 +259,11 @@ Future<String> downloadApk(
 /// 拉起系统安装器安装已下载的 APK。
 Future<void> installApk(String path) async {
   await _openUrlChannel.invokeMethod('installApk', {'path': path});
+}
+
+/// 清空更新目录里的安装包（无论安装成败都应调用）。
+Future<void> cleanUpdateApks() async {
+  try {
+    await _openUrlChannel.invokeMethod('cleanUpdateApks');
+  } catch (_) {}
 }

@@ -55,6 +55,16 @@ class MainActivity : FlutterActivity() {
                             result.error("install_failed", e.message, null)
                         }
                     }
+                    "cleanUpdateApks" -> {
+                        // 清空更新目录里的安装包（安装成败都清理，避免堆积）
+                        try {
+                            val dir = File(getExternalFilesDir(null), "update")
+                            dir.listFiles()?.forEach { it.delete() }
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("clean_failed", e.message, null)
+                        }
+                    }
                     "startKeepAlive" -> {
                         // 前台保活：切后台 / 锁屏时弹幕连接不被系统杀掉
                         val room = call.argument<String>("room") ?: ""

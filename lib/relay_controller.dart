@@ -7,6 +7,7 @@ import 'blive/api.dart';
 import 'blive/client.dart';
 import 'blive/normalize.dart';
 import 'store.dart';
+import 'updater.dart' show cleanUpdateApks;
 
 /// 弹幕空间的共享状态中心。
 ///
@@ -85,6 +86,8 @@ class RelayController extends ChangeNotifier {
     final cookie = await Store.loadCookie();
     favs = await Store.loadFavorites();
     recent = await Store.loadRecent();
+    // 兜底清理：上次会话残留的更新安装包（延迟清理没跑完时补刀）
+    unawaited(cleanUpdateApks());
     await Store.initLogSeq();
     unawaited(Store.pruneLogs());
 
