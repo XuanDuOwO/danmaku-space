@@ -58,6 +58,16 @@ class RelayController extends ChangeNotifier {
   /// 弹幕记录每次追加都自增，弹幕记录页据此判断是否需要重载。
   final ValueNotifier<int> logRevision = ValueNotifier<int>(0);
 
+  /// 弹幕空间全屏模式：隐藏页面标题与底部导航，只留直播间信息条和弹幕。
+  /// 返回键 / 信息条上的退出按钮可退出。
+  bool danmakuFullscreen = false;
+
+  void setDanmakuFullscreen(bool v) {
+    if (danmakuFullscreen == v) return;
+    danmakuFullscreen = v;
+    notifyListeners();
+  }
+
   /// 今日已写入的记录条数（弹幕记录页顶部展示）。
   int todayLogged = 0;
 

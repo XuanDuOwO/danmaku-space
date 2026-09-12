@@ -85,17 +85,28 @@ class _DanmakuTabState extends State<DanmakuTab> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final fs = _c.danmakuFullscreen;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('弹幕空间', style: TextStyle(fontSize: 16)),
-        actions: [
-          IconButton(
-            tooltip: '重新连接',
-            icon: const Icon(Icons.refresh),
-            onPressed: _c.roomId > 0 ? _c.refresh : null,
-          ),
-        ],
-      ),
+      // 全屏模式：隐藏「弹幕空间」标题栏，只留直播间信息条和弹幕列表
+      appBar: fs
+          ? null
+          : AppBar(
+              title: const Text('弹幕空间', style: TextStyle(fontSize: 16)),
+              actions: [
+                IconButton(
+                  tooltip: '重新连接',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _c.roomId > 0 ? _c.refresh : null,
+                ),
+                IconButton(
+                  tooltip: '全屏弹幕',
+                  icon: const Icon(Icons.fullscreen),
+                  onPressed: _c.roomId > 0
+                      ? () => _c.setDanmakuFullscreen(true)
+                      : null,
+                ),
+              ],
+            ),
       body: Column(
         children: [
           _buildTopBar(cs),
@@ -181,6 +192,17 @@ class _DanmakuTabState extends State<DanmakuTab> {
           _favIcon(cs, Icons.offline_bolt, Icons.offline_bolt_outlined,
               const Color(0xFFE3B341), _c.isFav('tech'),
               () => _toggleFav('tech'), () => _openManage('tech')),
+          // 全屏模式下的退出按钮（也可直接按系统返回键退出）
+          if (_c.danmakuFullscreen) ...[
+            const SizedBox(width: 2),
+            IconButton(
+              tooltip: '退出全屏',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.fullscreen_exit, size: 20),
+              color: cs.onSurfaceVariant,
+              onPressed: () => _c.setDanmakuFullscreen(false),
+            ),
+          ],
         ],
       ),
     );

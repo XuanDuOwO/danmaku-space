@@ -71,6 +71,8 @@ class _GateState extends State<Gate> {
         api.dispose();
       }
     }
+    // 调试旁路：--dart-define=SKIP_LOGIN=true 的验证构建可跳过扫码（正式版不受影响）
+    if (!ok && const bool.fromEnvironment('SKIP_LOGIN')) ok = true;
     if (!ok) await Store.clearCookie();
     if (!mounted) return;
     setState(() {
