@@ -1,3 +1,0 @@
---------- beginning of main
-09-12 10:23:27.544  2055  2078 I flutter : [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
-09-12 10:55:57.454  3575  3605 I flutter : [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
