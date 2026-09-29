@@ -362,22 +362,50 @@ LiveEvent? _stats(Map<String, dynamic> j) {
   );
 }
 
-LiveEvent _entryEffect(Map<String, dynamic> j) {
+/// 高能进场特效（舰长 / 大航海进场时的横幅）。
+///
+/// 报文里的 `copy_writing` 是**带占位符的模板**，形如
+/// `<%Ra1nFlo...%> 来了` —— 占位符里是观众昵称，而且服务端常常把它
+/// **截断**（`...` 就是截断标记）。直接显示会变成
+/// 「有人 <%Ra1nFlo...%> 来了」，既难看又没信息量。
+///
+/// 处理原则：
+///   - 占位符被截断 → 名字不可用，整条丢弃（返回 null）。
+///     这类进场在 `INTERACT_WORD_V2` 里已经有一条完整可读的记录，
+///     丢掉不会漏消息，只会少一次重复刷屏；
+///   - 占位符完整 → 去掉占位符，保留两侧的有效文案。
+LiveEvent? _entryEffect(Map<String, dynamic> j) {
   final d = (j['data'] as Map<String, dynamic>?) ?? const {};
+  final raw = '${d['copy_writing'] ?? d['copy_writing_v2'] ?? ''}';
+
+  // 名字被截断（占位符里有 ... 或 …）→ 整条没有可用信息
+  final truncated = RegExp(r'<%[^%]*(?:\.\.\.|…)[^%]*%>').hasMatch(raw);
+  if (truncated) return null;
+
+  final cleaned = raw
+      .replaceAll(RegExp(r'<%[^%]*%>'), '')
+      .replaceAll(RegExp(r'[<>]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (cleaned.isEmpty) return null;
+
   return LiveEvent(
     kind: EventKind.enter,
     cmd: 'ENTRY_EFFECT',
     ts: _nowMs(),
     user: LiveUser(
       uid: (d['uid'] as int?) ?? 0,
+      // 名字只存在于占位符里，这里拿不到可靠的昵称，交给上层用「有人」兜底。
       name: '',
       face: (d['face'] as String?) ?? '',
     ),
-    text: (d['copy_writing'] ?? d['copy_writing_v2'] ?? '') as String? ?? '',
+    text: cleaned,
   );
 }
 
-final _handler = <String, LiveEvent Function(Map<String, dynamic>)>{
+/// 各 cmd 的处理器。返回 null 表示「这个包没有可展示的内容」，
+/// 上层会直接忽略（例如 ENTRY_EFFECT 去掉占位符后没剩下东西）。
+final _handler = <String, LiveEvent? Function(Map<String, dynamic>)>{
   'DANMU_MSG': _danmaku,
   'INTERACT_WORD_V2': _interactV2,
   'INTERACT_WORD': _interact,
@@ -399,7 +427,7 @@ const _statsCmds = {
   'POPULAR_RANK_CHANGED',
 };
 
-/// 归一化入口，无法识别的消息类型返回 null。
+/// 归一化入口，无法识别的消息类型（以及处理器认为无需展示的）返回 null。
 LiveEvent? normalize(Map<String, dynamic> payload) {
   final cmd = (payload['cmd'] as String?) ?? '';
   final fn = _handler[cmd];

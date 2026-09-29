@@ -73,15 +73,38 @@ class RelayController extends ChangeNotifier {
   // ------------------------------------------------------------ 亮屏保活
 
   /// 亮屏保活：开启后屏幕不会自动熄灭，适合把手机当弹幕屏挂机。
-  /// 由弹幕空间页的开关控制；退出该页/退出应用时自动关闭。
+  ///
+  /// **语义是「粘性」的**：一旦打开就一直保持，切页、切后台、重启应用都不重置，
+  /// 只有用户手动关掉（或退出登录）才会解除。
+  /// 早期版本在切走弹幕页时自动关闭，但用户反馈「滑一下就没了」——
+  /// 挂机场景下这非常烦人，所以改成只在用户主动关闭时结束。
   bool keepScreenOn = false;
 
   /// 切换亮屏保活。返回是否真的生效（非 Android 平台会失败）。
+  ///
+  /// 成功后才落盘：如果平台通道失败（比如跑在非 Android 上），
+  /// 不应该把这个「想要开着」的意图记下来，否则下次启动会一直尝试失败。
   Future<bool> setKeepScreenOn(bool v) async {
     final ok = await ScreenKeeper.setEnabled(v);
     keepScreenOn = ok;
+    if (ok) await Store.saveKeepScreenOn(v);
     notifyListeners();
     return ok;
+  }
+
+  /// 启动时恢复上次的亮屏保活设置。
+  ///
+  /// 只在**用户上次是打开状态**时才真正下发到系统 ——
+  /// 默认关闭时不要无谓地调一次平台通道。
+  Future<void> _restoreKeepScreenOn() async {
+    if (!await Store.loadKeepScreenOn()) return;
+    final ok = await ScreenKeeper.setEnabled(true);
+    keepScreenOn = ok;
+    if (!ok) {
+      // 恢复失败（非 Android / 通道异常）就把意图清掉，避免每次都白试一遍。
+      await Store.saveKeepScreenOn(false);
+    }
+    notifyListeners();
   }
 
   // ------------------------------------------------------------ 实时观众
@@ -191,6 +214,8 @@ class RelayController extends ChangeNotifier {
     unawaited(cleanUpdateApks());
     // 弹幕持久化已移除：把老版本遗留的 dlog_* 数据清掉，把存储还给系统。
     unawaited(Store.purgeLegacyLogs());
+    // 恢复用户上次的亮屏保活设置（粘性开关，不随切页重置）。
+    unawaited(_restoreKeepScreenOn());
 
     _api = BilibiliApi(cookie: cookie);
     if (cookie.isNotEmpty) {
@@ -541,8 +566,8 @@ class RelayController extends ChangeNotifier {
   void dispose() {
     _enterTimer?.cancel();
     _stopAudiencePolling();
-    // 亮屏保活是进程级窗口标志：dispose 时必须撤掉，否则退出应用后
-    // 下一个用这个 Activity 的界面也会一直不熄屏。
+    // 亮屏保活是进程级窗口标志，dispose 时必须撤掉。
+    // 但**不清除**持久化的开关值 —— 那是用户意图，下次启动要恢复。
     if (keepScreenOn) unawaited(ScreenKeeper.release());
     // 保险：退出应用壳时恢复系统 UI
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

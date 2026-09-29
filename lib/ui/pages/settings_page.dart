@@ -140,7 +140,8 @@ class _SettingsTabState extends State<SettingsTab> {
             dense: true,
             leading: const Icon(Icons.lightbulb_outline, size: 20),
             title: const Text('亮屏保活', style: TextStyle(fontSize: 14)),
-            subtitle: const Text('开启后屏幕不自动熄灭（长时间常亮请留意烧屏）',
+            subtitle: const Text('开启后屏幕不自动熄灭，切页/切后台都保持；'
+                '仅手动关闭或退出登录时解除',
                 style: TextStyle(fontSize: 11)),
             trailing: Switch(
               value: _c.keepScreenOn,

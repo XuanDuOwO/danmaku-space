@@ -148,13 +148,9 @@ class _AppShellState extends State<AppShell> {
           controller: _pageCtrl,
           // 全屏模式下禁止滑动切页
           physics: fullscreen ? const NeverScrollableScrollPhysics() : null,
-          onPageChanged: (i) {
-            setState(() => _tab = i);
-            // 离开弹幕空间就关掉亮屏保活，避免用户在别的页面挂机时屏幕不灭。
-            if (i != _danmakuTab && _c.keepScreenOn) {
-              _c.setKeepScreenOn(false);
-            }
-          },
+          // 亮屏保活是「粘性」开关：切页不重置，只有用户手动关或退出登录才解除。
+          // 早期版本在这里自动关掉，用户反馈「滑一下就没了」，已改为不干预。
+          onPageChanged: (i) => setState(() => _tab = i),
           children: [
             _KeepAlive(
               child: PortalTab(

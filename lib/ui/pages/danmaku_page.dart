@@ -52,8 +52,7 @@ class _DanmakuTabState extends State<DanmakuTab> {
   void dispose() {
     _c.removeListener(_onChanged);
     _scroll.dispose();
-    // 离开弹幕页就撤掉亮屏保活，避免在其它页面也一直不熄屏。
-    if (_c.keepScreenOn) unawaited(_c.setKeepScreenOn(false));
+    // 亮屏保活是粘性开关，这里**不**关闭 —— 只有用户手动关或退出登录才解除。
     super.dispose();
   }
 

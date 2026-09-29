@@ -100,6 +100,7 @@ class Store {
   static const _kEmojiOrder = 'emoji_room_order';
   static const _kFsTopOffset = 'fs_top_offset';
   static const _kFsLeftOffset = 'fs_left_offset';
+  static const _kKeepScreenOn = 'keep_screen_on';
 
   /// 表情表与「已废弃的弹幕记录」用的前缀。
   static const _emojiPrefix = 'etab_';
@@ -256,6 +257,23 @@ class Store {
   static Future<void> saveFsOffset(double v, {required bool landscape}) async {
     final p = await SharedPreferences.getInstance();
     await p.setDouble(landscape ? _kFsLeftOffset : _kFsTopOffset, v);
+  }
+
+  // ------------------------------------------------------------ 亮屏保活
+
+  /// 亮屏保活开关是否处于「用户已手动打开」的状态。
+  ///
+  /// 之所以要持久化：这个开关的语义是「打开后一直保持，直到用户手动关闭」，
+  /// 所以切页、切后台、重启应用都不该把它重置 —— 存储下来才能在
+  /// 下次启动时恢复。
+  static Future<bool> loadKeepScreenOn() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kKeepScreenOn) ?? false;
+  }
+
+  static Future<void> saveKeepScreenOn(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kKeepScreenOn, v);
   }
 
   // ------------------------------------------------------------ 房间表情表
