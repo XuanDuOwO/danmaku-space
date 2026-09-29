@@ -1,19 +1,22 @@
 ﻿<#
 .SYNOPSIS
-    弹幕空间（danmaku）一键发版：改版本号 → 构建 APK → 建 Gitee Release → 上传 APK 附件。
+    弹幕空间（danmaku）一键发版：改版本号 → 构建 APK → Gitee + GitHub 双发布。
 
 .DESCRIPTION
-    本脚本是**本地**发布流程。之所以不用 Gitee Go 流水线：
-    Gitee 的 CI 需要额外开通且 APK 附件上传在流水线里不好处理，
-    而 Releases API 用私人令牌在本机跑一次就够，且发布的每一步都看得见。
+    本脚本是**本地**发布流程。之所以不用 CI 流水线：
+    APK 附件上传在流水线里不好处理，而且本机跑一次每一步都看得见。
 
     它会做这几件事（按顺序）：
       1. 校验版本号格式，确认工作区没有未提交改动（除非 -AllowDirty）；
       2. 把 pubspec.yaml 的 version 与 lib/core/updater.dart 的 kAppVersion
          一起改成同一个值 —— 这两处漂移过一次，必须脚本化；
       3. flutter build apk --release；
-      4. 调 Gitee API 建 tag + Release，并上传 APK 作为附件；
-      5. 打印 Release 地址与 APK 直链。
+      4. 推送代码到 Gitee(origin) 与 GitHub(github)；
+      5. 在两边各建 tag + Release，并上传同一个 APK 作为附件；
+      6. 打印两边地址与 APK 直链。
+
+    客户端只读 Gitee（见 lib/core/updater.dart 的 kGiteeRepo），
+    GitHub 那份是**镜像备份** —— 以 Gitee 访问更稳。
 
 .PARAMETER Version
     要发布的版本号，形如 1.0.9（不带 v，也不带 +build）。
@@ -28,12 +31,24 @@
     Gitee 令牌文件，默认 C:\Users\Administrator\Documents\令牌\gitee令牌.txt
     第一行格式为「私人<token>」。
 
+.PARAMETER GithubTokenFile
+    GitHub 令牌文件，默认 C:\Users\Administrator\Documents\github令牌.txt。
+
+.PARAMETER GiteeRepo
+    Gitee 仓库 owner/repo。
+
+.PARAMETER GithubRepo
+    GitHub 仓库 owner/repo。留空 = 跳过 GitHub。
+
 .PARAMETER AllowDirty
     允许工作区有未提交改动时继续（默认不允许，避免发布了没进版本库的代码）。
 
 .PARAMETER SkipBuild
     跳过构建，直接用已有的 build\app\outputs\flutter-apk\app-release.apk
     （调试上传流程时用）。
+
+.PARAMETER SkipGithub
+    只发 Gitee，不发 GitHub。
 
 .EXAMPLE
     pwsh scripts/release.ps1 -Version 1.1.0
@@ -47,8 +62,12 @@ param(
     [int]$BuildNumber = 0,
     [string]$Notes = '',
     [string]$TokenFile = 'C:\Users\Administrator\Documents\令牌\gitee令牌.txt',
+    [string]$GithubTokenFile = 'C:\Users\Administrator\Documents\github令牌.txt',
+    [string]$GiteeRepo = 'xuanduckl/danmaku',
+    [string]$GithubRepo = 'XuanDuOwO/danmaku-space',
     [switch]$AllowDirty,
     [switch]$SkipBuild,
+    [switch]$SkipGithub,
     [switch]$NoPush
 )
 
@@ -57,8 +76,9 @@ Set-StrictMode -Version Latest
 
 # ---------------------------------------------------------------- 常量
 
-$Repo        = 'xuanduckl/danmaku'
+$Repo        = $GiteeRepo
 $ApiBase     = 'https://gitee.com/api/v5'
+$GhApiBase   = 'https://api.github.com'
 $Tag         = "v$Version"
 $ApkName     = "danmaku-$Tag.apk"
 
@@ -186,16 +206,18 @@ try {
     # 先推代码，让 tag 指向已经进版本库的 commit
     if (-not $NoPush) {
         & $GitExe push origin HEAD
-        if ($LASTEXITCODE -ne 0) { throw 'git push 失败' }
+        if ($LASTEXITCODE -ne 0) { throw 'git push（Gitee）失败' }
         Write-Ok '代码已推送到 Gitee'
     }
 
-    # 建 Release（Gitee 会顺带建 tag；已存在时会报错，这里做成可重入）
+    # ------------------------------------------------------------ Gitee Release
+    Write-Step "创建 Gitee Release"
+
     $releaseId = 0
     $existing = & curl.exe -s "$ApiBase/repos/$Repo/releases/tags/$Tag?access_token=$Token"
     if ($existing -match '"id"\s*:\s*(\d+)') {
         $releaseId = [int]$Matches[1]
-        Write-Warn2 "Release $Tag 已存在（id=$releaseId），改为更新说明"
+        Write-Warn2 "Gitee Release $Tag 已存在（id=$releaseId），改为更新说明"
         & curl.exe -s -X PATCH -o NUL `
             --data-urlencode "access_token=$Token" `
             --data-urlencode "name=$Tag" `
@@ -211,35 +233,104 @@ try {
             "$ApiBase/repos/$Repo/releases"
         if ($resp -match '"id"\s*:\s*(\d+)') {
             $releaseId = [int]$Matches[1]
-            Write-Ok "Release $Tag 已创建（id=$releaseId）"
+            Write-Ok "Gitee Release $Tag 已创建（id=$releaseId）"
         } else {
-            throw "创建 Release 失败：$resp"
+            throw "创建 Gitee Release 失败：$resp"
         }
     }
 
-    # 上传 APK 附件
-    Write-Step "上传 APK 附件"
+    # 上传 APK 附件到 Gitee
+    Write-Step "上传 APK 附件到 Gitee"
     $copy = Join-Path ([System.IO.Path]::GetTempPath()) $ApkName
     Copy-Item $ApkPath $copy -Force
     $up = & curl.exe -s -X POST -F "file=@$copy" `
         "$ApiBase/repos/$Repo/releases/$releaseId/attach_files?access_token=$Token"
-    Remove-Item $copy -Force -ErrorAction SilentlyContinue
     if ($up -match '"browser_download_url"\s*:\s*"([^"]+)"') {
         $apkUrl = $Matches[1]
-        Write-Ok "APK 已上传"
+        Write-Ok "APK 已上传到 Gitee"
     } else {
-        throw "上传 APK 失败：$up"
+        throw "上传 APK 到 Gitee 失败：$up"
     }
+
+    # ------------------------------------------------------------ GitHub 镜像
+    $ghUrl = ''
+    if (-not $SkipGithub -and $GithubRepo.Trim().IsNotEmpty) {
+        Write-Step "发布 GitHub 镜像（$GithubRepo）"
+        try {
+            if (-not (Test-Path $GithubTokenFile)) { throw "找不到令牌文件：$GithubTokenFile" }
+            $ghToken = (Read-Text $GithubTokenFile).Trim()
+            if ($ghToken.Length -lt 20) { throw 'GitHub 令牌看起来不对。' }
+
+            # 推代码（GitHub 默认分支叫 main）
+            if (-not $NoPush) {
+                & $GitExe -c http.proxy= -c https.proxy= push github "HEAD:main" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'git push（GitHub）失败' }
+                Write-Ok '代码已推送到 GitHub'
+            }
+
+            $ghHeaders = @(
+                '-H', "Authorization: Bearer $ghToken",
+                '-H', 'User-Agent: dsh',
+                '-H', 'Accept: application/vnd.github+json'
+            )
+            $ghBody = @{ tag_name = $Tag; name = $Tag; body = $Notes; draft = $false; prerelease = $false } |
+                ConvertTo-Json -Compress
+            $ghBodyFile = Join-Path ([System.IO.Path]::GetTempPath()) 'gh_release_body.json'
+            [System.IO.File]::WriteAllText($ghBodyFile, $ghBody, (New-Object System.Text.UTF8Encoding($false)))
+
+            # 已存在就先删掉重建，保证附件是最新的（GitHub 不支持覆盖同名附件）
+            $ghExisting = & curl.exe -s --noproxy '*' @ghHeaders `
+                "$GhApiBase/repos/$GithubRepo/releases/tags/$Tag"
+            if ($ghExisting -match '"id"\s*:\s*(\d+)') {
+                $oldId = [int]$Matches[1]
+                & curl.exe -s --noproxy '*' -X DELETE @ghHeaders -o NUL `
+                    "$GhApiBase/repos/$GithubRepo/releases/$oldId"
+                Write-Warn2 "GitHub Release $Tag 已存在，已删除旧版准备重建"
+            }
+
+            $ghResp = & curl.exe -s --noproxy '*' -X POST @ghHeaders `
+                -H 'Content-Type: application/json' `
+                --data-binary "@$ghBodyFile" `
+                "$GhApiBase/repos/$GithubRepo/releases"
+            Remove-Item $ghBodyFile -Force -ErrorAction SilentlyContinue
+            if ($ghResp -match '"id"\s*:\s*(\d+)') {
+                $ghReleaseId = [int]$Matches[1]
+                Write-Ok "GitHub Release $Tag 已创建（id=$ghReleaseId）"
+            } else {
+                throw "创建 GitHub Release 失败：$ghResp"
+            }
+
+            $ghUp = & curl.exe -s --noproxy '*' -X POST @ghHeaders `
+                -H 'Content-Type: application/vnd.android.package-archive' `
+                --data-binary "@$copy" `
+                "https://uploads.github.com/repos/$GithubRepo/releases/$ghReleaseId/assets?name=$ApkName"
+            if ($ghUp -match '"browser_download_url"\s*:\s*"([^"]+)"') {
+                $ghUrl = $Matches[1]
+                Write-Ok 'APK 已上传到 GitHub'
+            } else {
+                throw "上传 APK 到 GitHub 失败：$ghUp"
+            }
+        } catch {
+            # GitHub 只是镜像，失败不该让整次发布失败 —— Gitee 那边已经成了。
+            Write-Warn2 "GitHub 镜像发布失败（不影响 Gitee）：$($_.Exception.Message)"
+            $ghUrl = ''
+        }
+    }
+    Remove-Item $copy -Force -ErrorAction SilentlyContinue
 
     # ------------------------------------------------------------ 结果
     Write-Step "发布完成"
     Write-Host "  版本      : $Version (versionCode $BuildNumber)"
     Write-Host "  包名      : cn.local.bili_live_relay"
     Write-Host "  APK 大小  : $([math]::Round($apkSize / 1MB, 1)) MB"
-    Write-Host "  Release   : https://gitee.com/$Repo/releases/tag/$Tag"
+    Write-Host "  Gitee     : https://gitee.com/$Repo/releases/tag/$Tag"
     Write-Host "  APK 直链  : $apkUrl"
+    if ($ghUrl) {
+        Write-Host "  GitHub    : https://github.com/$GithubRepo/releases/tag/$Tag"
+        Write-Host "  镜像直链  : $ghUrl"
+    }
     Write-Host ""
-    Write-Host "  客户端「设置 → 检测更新」会读 releases/latest 并比对 kAppVersion。" -ForegroundColor DarkGray
+    Write-Host "  客户端「设置 → 检测更新」读的是 Gitee 的 releases/latest。" -ForegroundColor DarkGray
 }
 finally {
     Pop-Location

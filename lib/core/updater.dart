@@ -5,15 +5,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
-/// 应用内检测更新：按顺序查 1) Gitee Releases 2) 自建更新服务器。
-/// 两边都没有新版本才提示「已是最新」。
+/// 应用内检测更新：依次查 1) Gitee Releases 2) GitHub Releases 3) 自建更新服务器。
+/// 全都没有新版本才提示「已是最新」。
 ///
 /// 发新版：在仓库根目录跑 `pwsh scripts/release.ps1 -Version 1.0.9`，
-/// 脚本会改版本号、构建 APK、在 Gitee 建 Release 并上传 APK 附件。
+/// 脚本会改版本号、构建 APK，并在 **Gitee 与 GitHub 两处**各建一个 Release
+/// 并上传同一个 APK。
 ///
-/// 为什么不再用 GitHub：App 侧原先硬编码了一个细粒度 PAT 才能读私有仓库，
-/// 令牌随 APK 分发、无法轮换。Gitee 仓库是公开的，`releases/latest`
-/// 匿名即可读，客户端**不需要**任何凭据。
+/// 为什么两个源都要查：Gitee 在国内访问稳、GitHub 是镜像备份。
+/// 两个源都不需要任何凭据 —— 仓库都是公开的，`releases/latest` 匿名可读。
+/// （早期版本为了读私有仓库，把 GitHub PAT 硬编码进 App，令牌随 APK 分发、
+/// 无法轮换，已彻底移除。）
 
 /// 更新信息（发现新版本时返回）。
 class UpdateInfo {
@@ -25,7 +27,7 @@ class UpdateInfo {
   /// 更新说明，可为空。
   final String notes;
 
-  /// 来源：'Gitee' 或 '服务器'。
+  /// 来源：'Gitee' / 'GitHub' / '服务器'。
   final String source;
 
   const UpdateInfo({
@@ -37,7 +39,7 @@ class UpdateInfo {
 }
 
 /// 检测结果：candidates 是**所有**有新版本的源（按优先级排好序），
-/// 下载时逐个尝试，任一成功即用 —— 两个源完全等价、自动互备。
+/// 下载时逐个尝试，任一成功即用 —— 多个源自动互备。
 class UpdateCheckResult {
   final List<UpdateInfo> candidates;
 
@@ -51,8 +53,11 @@ class UpdateCheckResult {
 
 // ======================= 发布配置（发新版时改这里） =======================
 
-/// Gitee 仓库名（owner/repo）。留空 = 跳过 Gitee 检查。
+/// Gitee 仓库名（owner/repo）。留空 = 跳过该源。
 const String kGiteeRepo = 'xuanduckl/danmaku';
+
+/// GitHub 镜像仓库名（owner/repo）。留空 = 跳过该源。
+const String kGithubRepo = 'XuanDuOwO/danmaku-space';
 
 /// 自建更新服务地址。留空 = 跳过该源。
 /// 约定返回 JSON：{"version":"1.0.9","url":"https://.../x.apk","notes":"说明"}
@@ -64,51 +69,58 @@ const String kAppVersion = '1.1.0';
 
 // ========================================================================
 
-/// 检测更新：两个源都查一遍，收集所有有新版本的候选（Gitee 优先）。
-/// 任一源失败不影响另一个；下载阶段再按候选顺序逐个尝试。
+/// 检测更新：所有源都查一遍，收集所有有新版本的候选（Gitee 优先）。
+/// 任一源失败不影响其它源；下载阶段再按候选顺序逐个尝试。
 Future<UpdateCheckResult> checkForUpdate() async {
   var reached = false;
   final candidates = <UpdateInfo>[];
 
   // 1) Gitee Releases（公开仓库，匿名可读，不需要令牌）
   if (kGiteeRepo.isNotEmpty) {
-    try {
-      final r = await http
-          .get(
-            Uri.parse(
-                'https://gitee.com/api/v5/repos/$kGiteeRepo/releases/latest'),
-            headers: const {'User-Agent': 'Mozilla/5.0'},
-          )
-          .timeout(const Duration(seconds: 10));
-      // 只有真的拿到 2xx 才算「源连通」，否则测速失败会被误报成「已是最新」。
-      if (r.statusCode == 200) {
-        reached = true;
-        final j = jsonDecode(r.body);
-        if (j is Map<String, dynamic>) {
-          final tag = '${j['tag_name'] ?? ''}';
-          final ver = tag.startsWith('v') || tag.startsWith('V')
-              ? tag.substring(1)
-              : tag;
-          final apkUrl = _pickApkAsset(j['assets']);
-          if (ver.isNotEmpty && apkUrl.isNotEmpty && isNewer(ver)) {
-            candidates.add(UpdateInfo(
-              version: ver,
-              url: apkUrl,
-              notes: '${j['body'] ?? ''}'.trim(),
-              source: 'Gitee',
-            ));
-          }
-        }
-      } else {
-        debugPrint('[update] Gitee 返回 HTTP ${r.statusCode}: '
-            '${r.body.length > 200 ? r.body.substring(0, 200) : r.body}');
+    final r = await _fetchRelease(
+      Uri.parse('https://gitee.com/api/v5/repos/$kGiteeRepo/releases/latest'),
+      'Gitee',
+    );
+    if (r != null) {
+      reached = true;
+      final ver = _tagToVersion(r['tag_name']);
+      final apkUrl = _pickApkAsset(r['assets']);
+      if (ver.isNotEmpty && apkUrl.isNotEmpty && isNewer(ver)) {
+        candidates.add(UpdateInfo(
+          version: ver,
+          url: apkUrl,
+          notes: '${r['body'] ?? ''}'.trim(),
+          source: 'Gitee',
+        ));
       }
-    } catch (e) {
-      debugPrint('[update] Gitee 检测失败: $e');
     }
   }
 
-  // 2) 自建更新服务器（未配置时跳过）
+  // 2) GitHub Releases（镜像备份，同样匿名可读）
+  if (kGithubRepo.isNotEmpty) {
+    final r = await _fetchRelease(
+      Uri.parse(
+          'https://api.github.com/repos/$kGithubRepo/releases/latest'),
+      'GitHub',
+    );
+    if (r != null) {
+      reached = true;
+      final ver = _tagToVersion(r['tag_name']);
+      final apkUrl = _pickApkAsset(r['assets']);
+      // 同一个版本已经在 Gitee 上收过了就不重复添加（两边内容一致）。
+      final dup = candidates.any((c) => c.version == ver);
+      if (ver.isNotEmpty && apkUrl.isNotEmpty && !dup && isNewer(ver)) {
+        candidates.add(UpdateInfo(
+          version: ver,
+          url: apkUrl,
+          notes: '${r['body'] ?? ''}'.trim(),
+          source: 'GitHub',
+        ));
+      }
+    }
+  }
+
+  // 3) 自建更新服务器（未配置时跳过）
   if (kServerUpdateUrl.isNotEmpty) {
     try {
       final r2 = await http
@@ -121,7 +133,7 @@ Future<UpdateCheckResult> checkForUpdate() async {
         if (j is Map<String, dynamic>) {
           final ver = '${j['version'] ?? ''}'.trim();
           final url = '${j['url'] ?? ''}'.trim();
-          final dup = candidates.any((c) => c.version == ver && c.url == url);
+          final dup = candidates.any((c) => c.version == ver);
           if (ver.isNotEmpty && url.isNotEmpty && !dup && isNewer(ver)) {
             candidates.add(UpdateInfo(
               version: ver,
@@ -138,6 +150,35 @@ Future<UpdateCheckResult> checkForUpdate() async {
   }
 
   return UpdateCheckResult(candidates: candidates, reached: reached);
+}
+
+/// 取一个源的 latest release；失败或非 200 返回 null。
+///
+/// 只有真的拿到 2xx 才算「源连通」—— 否则把它算成连通会让
+/// 「两个源都挂了」被误报成「已是最新版本」，那是最坏的故障模式。
+Future<Map<String, dynamic>?> _fetchRelease(Uri uri, String label) async {
+  try {
+    final r = await http
+        .get(uri, headers: const {'User-Agent': 'Mozilla/5.0'})
+        .timeout(const Duration(seconds: 10));
+    if (r.statusCode != 200) {
+      debugPrint('[update] $label 返回 HTTP ${r.statusCode}: '
+          '${r.body.length > 200 ? r.body.substring(0, 200) : r.body}');
+      return null;
+    }
+    final j = jsonDecode(r.body);
+    return j is Map<String, dynamic> ? j : null;
+  } catch (e) {
+    debugPrint('[update] $label 检测失败: $e');
+    return null;
+  }
+}
+
+/// tag 名转版本号：`v1.0.9` / `V1.0.9` / `1.0.9` 都能认。
+String _tagToVersion(Object? tag) {
+  final s = '${tag ?? ''}'.trim();
+  if (s.isEmpty) return '';
+  return (s.startsWith('v') || s.startsWith('V')) ? s.substring(1) : s;
 }
 
 /// 从 Release 的 assets 里挑出 APK 下载地址。
