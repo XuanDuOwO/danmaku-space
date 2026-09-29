@@ -261,7 +261,7 @@ try {
 
     # ------------------------------------------------------------ GitHub 镜像
     $ghUrl = ''
-    if (-not $SkipGithub -and $GithubRepo.Trim().IsNotEmpty) {
+    if (-not $SkipGithub -and $GithubRepo.Trim().Length -gt 0) {
         Write-Step "发布 GitHub 镜像（$GithubRepo）"
         try {
             if (-not (Test-Path $GithubTokenFile)) { throw "找不到令牌文件：$GithubTokenFile" }
