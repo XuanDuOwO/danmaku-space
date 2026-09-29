@@ -208,7 +208,12 @@ try {
     # 注意：PowerShell 5.1 的 String 没有 .IsEmpty 属性（那是 .NET Core 才有的），
     # 这里统一用 .Length -eq 0 判断。
     if ($Notes.Trim().Length -eq 0) {
-        $Notes = (& $GitExe log -1 --pretty=%B).Trim()
+        # 默认取「最近的、不是发版本身产生的」提交标题，拼成变更列表。
+        # 直接用最后一次提交会经常拿到 chore(release) 自己，说明栏毫无信息量。
+        $subjects = & $GitExe log -20 --pretty=%s |
+            Where-Object { $_ -notmatch '^chore\(release\)' -and $_ -notmatch '^fix\(release\)' } |
+            Select-Object -First 12
+        if ($subjects) { $Notes = ($subjects | ForEach-Object { "- $_" }) -join "`n" }
     }
     if ($Notes.Trim().Length -eq 0) { $Notes = "弹幕空间 $Tag" }
 
