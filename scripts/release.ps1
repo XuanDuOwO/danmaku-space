@@ -80,7 +80,7 @@ $Repo        = $GiteeRepo
 $ApiBase     = 'https://gitee.com/api/v5'
 $GhApiBase   = 'https://api.github.com'
 $Tag         = "v$Version"
-$ApkName     = "danmaku-$Tag.apk"
+$ApkName     = "danmaku-${Tag}.apk"
 
 $Root        = Split-Path -Parent $PSScriptRoot
 $Pubspec     = Join-Path $Root 'pubspec.yaml'
@@ -219,11 +219,9 @@ try {
         Write-Ok '代码已推送到 Gitee'
     }
 
-    # ------------------------------------------------------------ Gitee Release
-    Write-Step "创建 Gitee Release"
-
     $releaseId = 0
-    $existing = & curl.exe -s "$ApiBase/repos/$Repo/releases/tags/$Tag?access_token=$Token"
+    # 用 ${Tag} 而不是 $Tag —— 紧跟其后的 ? 会被 PowerShell 当成变量名的一部分。
+    $existing = & curl.exe -s "$ApiBase/repos/$Repo/releases/tags/${Tag}?access_token=$Token"
     if ($existing -match '"id"\s*:\s*(\d+)') {
         $releaseId = [int]$Matches[1]
         Write-Warn2 "Gitee Release $Tag 已存在（id=$releaseId），改为更新说明"
