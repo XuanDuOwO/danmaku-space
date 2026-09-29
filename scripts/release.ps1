@@ -106,15 +106,19 @@ function Write-Text([string]$p, [string]$t) { [System.IO.File]::WriteAllText($p,
 
 if (-not (Test-Path $Pubspec)) { throw "找不到 pubspec.yaml：$Pubspec" }
 
-$git = Get-Command git -ErrorAction SilentlyContinue
-if ($null -eq $git) {
-    # 本机的 git 不在 PATH 上，按已知安装位置兜底。
+# 定位 git.exe。
+# 注意 Get-Command 返回的是 ApplicationInfo（有 Source，没有 FullName），
+# 而 Get-Item 返回 FileInfo（有 FullName）—— 两个都要能取到路径。
+$GitExe = ''
+$cmd = Get-Command git -ErrorAction SilentlyContinue
+if ($cmd) { $GitExe = $cmd.Source }
+if (-not $GitExe) {
+    # PATH 上没有就按已知安装位置兜底。
     foreach ($c in @('C:\DevelopTools\git\cmd\git.exe', "$env:ProgramFiles\Git\cmd\git.exe")) {
-        if (Test-Path $c) { $git = Get-Item $c; break }
+        if (Test-Path $c) { $GitExe = $c; break }
     }
 }
-if ($null -eq $git) { throw '找不到 git，请先安装或把 git.exe 加进 PATH。' }
-$GitExe = $git.FullName
+if (-not $GitExe) { throw '找不到 git，请先安装或把 git.exe 加进 PATH。' }
 
 Push-Location $Root
 try {
@@ -158,14 +162,17 @@ try {
     if ($SkipBuild) {
         Write-Warn2 '已指定 -SkipBuild，跳过构建'
     } else {
-        $flutter = Get-Command flutter -ErrorAction SilentlyContinue
-        if ($null -eq $flutter) {
+        # 同样注意 ApplicationInfo.Source vs FileInfo.FullName 的差异。
+        $FlutterExe = ''
+        $fc = Get-Command flutter -ErrorAction SilentlyContinue
+        if ($fc) { $FlutterExe = $fc.Source }
+        if (-not $FlutterExe) {
             $fb = 'C:\DevelopTools\flutter\bin\flutter.bat'
-            if (Test-Path $fb) { $flutter = Get-Item $fb } else { throw '找不到 flutter，请加进 PATH。' }
+            if (Test-Path $fb) { $FlutterExe = $fb } else { throw '找不到 flutter，请加进 PATH。' }
         }
-        & $flutter.FullName pub get
+        & $FlutterExe pub get
         if ($LASTEXITCODE -ne 0) { throw 'flutter pub get 失败' }
-        & $flutter.FullName build apk --release
+        & $FlutterExe build apk --release
         if ($LASTEXITCODE -ne 0) { throw 'flutter build apk --release 失败' }
     }
 
@@ -179,7 +186,7 @@ try {
             Sort-Object FullName -Descending | Select-Object -First 1
     if ($aapt) {
         $badging = & $aapt.FullName dump badging $ApkPath 2>$null | Select-String '^package:'
-        Write-Ok $badging.Line.Trim()
+        if ($badging) { Write-Ok $badging.Line.Trim() }
     }
 
     # ------------------------------------------------------------ 提交版本改动
@@ -198,10 +205,12 @@ try {
     $Token = ($tokenLine -replace '^\s*私人\s*', '').Trim()
     if ($Token.Length -lt 20) { throw '令牌看起来不对（长度过短）。' }
 
-    if ($Notes.Trim().IsEmpty) {
+    # 注意：PowerShell 5.1 的 String 没有 .IsEmpty 属性（那是 .NET Core 才有的），
+    # 这里统一用 .Length -eq 0 判断。
+    if ($Notes.Trim().Length -eq 0) {
         $Notes = (& $GitExe log -1 --pretty=%B).Trim()
     }
-    if ($Notes.Trim().IsEmpty) { $Notes = "弹幕空间 $Tag" }
+    if ($Notes.Trim().Length -eq 0) { $Notes = "弹幕空间 $Tag" }
 
     # 先推代码，让 tag 指向已经进版本库的 commit
     if (-not $NoPush) {
