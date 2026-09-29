@@ -362,46 +362,26 @@ LiveEvent? _stats(Map<String, dynamic> j) {
   );
 }
 
-/// 高能进场特效（舰长 / 大航海进场时的横幅）。
+/// 高能进场特效 —— **整条丢弃**。
 ///
-/// 报文里的 `copy_writing` 是**带占位符的模板**，形如
-/// `<%Ra1nFlo...%> 来了` —— 占位符里是观众昵称，而且服务端常常把它
-/// **截断**（`...` 就是截断标记）。直接显示会变成
-/// 「有人 <%Ra1nFlo...%> 来了」，既难看又没信息量。
+/// 实测（2026-09，房间 13308358）报文长这样：
 ///
-/// 处理原则：
-///   - 占位符被截断 → 名字不可用，整条丢弃（返回 null）。
-///     这类进场在 `INTERACT_WORD_V2` 里已经有一条完整可读的记录，
-///     丢掉不会漏消息，只会少一次重复刷屏；
-///   - 占位符完整 → 去掉占位符，保留两侧的有效文案。
-LiveEvent? _entryEffect(Map<String, dynamic> j) {
-  final d = (j['data'] as Map<String, dynamic>?) ?? const {};
-  final raw = '${d['copy_writing'] ?? d['copy_writing_v2'] ?? ''}';
+/// ```
+/// copy_writing = "<%滥殇生命%> 来了"
+/// copy_writing = "<%清风夜月一帘幽...%> 来了"   // 昵称被服务端截断
+/// ```
+///
+/// 也就是说它只是个**模板**：昵称塞在 `<% %>` 占位符里，页面得自己替换。
+/// 早期版本把整串当文案直接渲染，于是弹幕里刷出
+/// 「有人 <%Ra1nFlo...%> 来了」这种没人看得懂的东西。
+///
+/// 但**同一批用户进场，`INTERACT_WORD_V2` 已经产生了一条完整可读的记录**
+/// （实测显示为「潮信鸟 进入了直播间」，昵称完整、带勋章）。
+/// 两条一起渲染就是同一个人的重复刷屏，所以这里直接返回 null，
+/// 把进场展示完全交给 INTERACT_WORD_V2 —— 昵称不必自己去占位符里抠，
+/// 也就不会遇到「被截断的昵称」这个坑。
+LiveEvent? _entryEffect(Map<String, dynamic> j) => null;
 
-  // 名字被截断（占位符里有 ... 或 …）→ 整条没有可用信息
-  final truncated = RegExp(r'<%[^%]*(?:\.\.\.|…)[^%]*%>').hasMatch(raw);
-  if (truncated) return null;
-
-  final cleaned = raw
-      .replaceAll(RegExp(r'<%[^%]*%>'), '')
-      .replaceAll(RegExp(r'[<>]'), '')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  if (cleaned.isEmpty) return null;
-
-  return LiveEvent(
-    kind: EventKind.enter,
-    cmd: 'ENTRY_EFFECT',
-    ts: _nowMs(),
-    user: LiveUser(
-      uid: (d['uid'] as int?) ?? 0,
-      // 名字只存在于占位符里，这里拿不到可靠的昵称，交给上层用「有人」兜底。
-      name: '',
-      face: (d['face'] as String?) ?? '',
-    ),
-    text: cleaned,
-  );
-}
 
 /// 各 cmd 的处理器。返回 null 表示「这个包没有可展示的内容」，
 /// 上层会直接忽略（例如 ENTRY_EFFECT 去掉占位符后没剩下东西）。
