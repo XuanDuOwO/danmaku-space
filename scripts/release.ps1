@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     弹幕空间（danmaku）一键发版：改版本号 → 构建 APK → 建 Gitee Release → 上传 APK 附件。
 
