@@ -91,6 +91,18 @@ function Write-Step([string]$msg) { Write-Host "`n=== $msg ===" -ForegroundColor
 function Write-Ok([string]$msg)   { Write-Host "  OK  $msg" -ForegroundColor Green }
 function Write-Warn2([string]$msg) { Write-Host "  !!  $msg" -ForegroundColor Yellow }
 
+# 调用外部程序并返回退出码。
+#
+# 关键点：**不要**写成 `& $exe ... 2>&1 | Out-Null`。
+# PowerShell 5.1 会把重定向进来的 stderr 变成 ErrorRecord，配合
+# $ErrorActionPreference='Stop' 会直接抛终止错误 —— git push 在
+# "Everything up-to-date" 时会往 stderr 写一行，于是明明成功却报错退出。
+# 这里让 stderr 原样打到控制台，只取退出码。
+function Invoke-Native([string]$exe, [string[]]$nativeArgs) {
+    & $exe @nativeArgs
+    return $LASTEXITCODE
+}
+
 # ---------------------------------------------------------------- 前置检查
 
 Write-Step "前置检查"
@@ -275,8 +287,8 @@ try {
 
             # 推代码（GitHub 默认分支叫 main）
             if (-not $NoPush) {
-                & $GitExe -c http.proxy= -c https.proxy= push github "HEAD:main" 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw 'git push（GitHub）失败' }
+                $rc = Invoke-Native $GitExe @('-c','http.proxy=','-c','https.proxy=','push','github','HEAD:main')
+                if ($rc -ne 0) { throw "git push（GitHub）失败，exit=$rc" }
                 Write-Ok '代码已推送到 GitHub'
             }
 
