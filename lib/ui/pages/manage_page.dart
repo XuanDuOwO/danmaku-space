@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'anim.dart';
-import 'store.dart';
+import '../anim.dart';
+import '../theme.dart';
+import '../../core/store.dart';
 
 /// 收藏批量管理页：集中管理「爱播 / 技播」名单，不占用弹幕区域。
 /// - 点某一行：选中该直播间（返回其房间号，由弹幕页切换连接）
@@ -199,7 +200,7 @@ class _ManagePageState extends State<ManagePage>
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 84),
       itemCount: list.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
+      separatorBuilder: (_, _) => const Divider(height: 1, indent: 68),
       itemBuilder: (_, i) {
         final f = list[i];
         final checked = _selected.contains(f.roomId);
@@ -267,9 +268,9 @@ class _ManagePageState extends State<ManagePage>
   Widget _avatar(FavRoom f, Color color) {
     return CircleAvatar(
       radius: 20,
-      backgroundColor: const Color(0xFF1B2129),
+      backgroundColor: AppColors.surfaceHighlight,
       backgroundImage: f.face.isNotEmpty ? NetworkImage(f.face) : null,
-      onBackgroundImageError: (_, __) {},
+      onBackgroundImageError: (_, _) {},
       child: f.face.isEmpty
           ? Text(
               f.name.isNotEmpty ? f.name.characters.first : '${f.roomId}',

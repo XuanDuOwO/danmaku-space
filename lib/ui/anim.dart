@@ -42,8 +42,8 @@ class FadeSlideRoute<T> extends PageRouteBuilder<T> {
       : super(
           transitionDuration: const Duration(milliseconds: 260),
           reverseTransitionDuration: const Duration(milliseconds: 200),
-          pageBuilder: (_, __, ___) => page,
-          transitionsBuilder: (_, anim, __, child) {
+          pageBuilder: (_, _, _) => page,
+          transitionsBuilder: (_, anim, _, child) {
             final curved =
                 CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
             return SlideTransition(

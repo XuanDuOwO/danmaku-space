@@ -3,6 +3,7 @@ package cn.local.bili_live_relay
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -17,8 +18,35 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // 亮屏保活：置 / 清 FLAG_KEEP_SCREEN_ON。
+                    // 该标志属于窗口，不需要任何权限，Activity 销毁时随窗口一起失效，
+                    // 因此不存在「忘记释放导致永不熄屏」的漏电风险。
+                    "setKeepScreenOn" -> {
+                        val on = call.argument<Boolean>("on") ?: false
+                        try {
+                            runOnUiThread {
+                                if (on) {
+                                    window.addFlags(
+                                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                    )
+                                } else {
+                                    window.clearFlags(
+                                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                    )
+                                }
+                            }
+                            result.success(on)
+                        } catch (e: Exception) {
+                            result.error("keep_screen_failed", e.message, null)
+                        }
+                    }
                     "openUrl" -> {
                         val url = call.argument<String>("url") ?: ""
+                        // 只放行 http(s)，避免被传入 file:// 等意外 scheme
+                        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                            result.error("bad_url", "仅支持 http(s) 链接", null)
+                            return@setMethodCallHandler
+                        }
                         try {
                             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             result.success(null)

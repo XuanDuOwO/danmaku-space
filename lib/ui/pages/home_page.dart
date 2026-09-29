@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'anim.dart';
+import '../anim.dart';
+import '../theme.dart';
 import 'manage_page.dart';
-import 'relay_controller.dart';
-import 'room_ref.dart';
-import 'store.dart';
+import '../../state/relay_controller.dart';
+import '../../core/room_ref.dart';
+import '../../core/store.dart';
 
 /// 传送门（模块一）：只负责「怎么进直播间」。
 ///   - 输入房间号 / 粘贴分享链接
@@ -109,7 +110,7 @@ class _PortalTabState extends State<PortalTab> {
       height: 28,
       decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        color: Color(0xFF1B2129),
+        color: AppColors.surfaceHighlight,
       ),
       child: ClipOval(
         child: widget.loginFace.isNotEmpty
@@ -118,7 +119,7 @@ class _PortalTabState extends State<PortalTab> {
                 width: 28,
                 height: 28,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Center(
+                errorBuilder: (_, _, _) => Center(
                   child:
                       Text(fallback, style: const TextStyle(fontSize: 12.5)),
                 ),
@@ -227,9 +228,9 @@ class _PortalTabState extends State<PortalTab> {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF11161D),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF222831)),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -258,7 +259,7 @@ class _PortalTabState extends State<PortalTab> {
               ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFF2A313C)),
+                borderSide: const BorderSide(color: AppColors.border),
               ),
             ),
             style: const TextStyle(fontSize: 14),
@@ -314,7 +315,7 @@ class _PortalTabState extends State<PortalTab> {
             ? Image.network(
                 face,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Center(
+                errorBuilder: (_, _, _) => Center(
                   child: Text(fallback,
                       style: const TextStyle(fontSize: 10.5)),
                 ),
@@ -385,7 +386,7 @@ class _PortalTabState extends State<PortalTab> {
             ),
           ),
           const Spacer(),
-          if (action != null) action,
+          ?action,
         ],
       ),
     );
@@ -399,7 +400,7 @@ class _PortalTabState extends State<PortalTab> {
     required VoidCallback onTap,
   }) {
     return Material(
-      color: const Color(0xFF11161D),
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),

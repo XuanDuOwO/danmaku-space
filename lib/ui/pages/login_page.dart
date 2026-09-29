@@ -3,8 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import 'blive/api.dart';
-import 'store.dart';
+import '../../blive/api.dart';
+import '../../core/store.dart';
+import '../theme.dart';
 
 /// 扫码登录页：**启动后必须扫码登录才能进入**（由 main.dart 的 Gate 控制）。
 /// 只支持扫码、不做账号密码输入，避免密码经手本 App。
@@ -161,9 +162,9 @@ class _LoginPageState extends State<LoginPage> {
               Container(
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF11161D),
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF222831)),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

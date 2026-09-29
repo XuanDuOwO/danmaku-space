@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'blive/api.dart';
-import 'login_page.dart';
-import 'shell.dart';
-import 'store.dart';
+import 'ui/pages/login_page.dart';
+import 'ui/shell.dart';
+import 'ui/theme.dart';
+import 'core/store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,13 +19,8 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: '弹幕空间',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0E1116),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4D9FFF),
-          brightness: Brightness.dark,
-        ),
-      ),
+      // 纯黑主题：配合「亮屏保活」长时间常亮，OLED 上不发光、不烧屏。
+      theme: buildAppTheme(),
       home: const Gate(),
     );
   }

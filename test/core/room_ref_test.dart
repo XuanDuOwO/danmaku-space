@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:bili_live_relay/room_ref.dart';
+import 'package:bili_live_relay/core/room_ref.dart';
 
 void main() {
   test('纯数字房间号', () async {

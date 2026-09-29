@@ -1,16 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
-import 'anim.dart';
-import 'blive/client.dart';
-import 'blive/normalize.dart';
-import 'emoji_text.dart';
+import '../anim.dart';
+import '../../blive/client.dart';
+import '../../blive/gift.dart';
+import '../../blive/normalize.dart';
+import '../emoji_text.dart';
+import 'gift_page.dart';
 import 'manage_page.dart';
-import 'relay_controller.dart';
-import 'store.dart';
+import '../../state/relay_controller.dart';
+import '../../core/store.dart';
+import '../theme.dart';
 
 /// 弹幕空间（模块二）：当前房间的实时弹幕。
-/// 只承载「直播间信息 + 收藏图标 + 进场提示 + 弹幕列表」，
-/// 设置与弹幕记录都是平级的独立模块，不从这里进入。
+/// 承载「直播间信息 + 在线人数 + 收藏图标 + 亮屏开关 + 进场提示 + 弹幕列表」，
+/// 观众榜与礼物统计在平级的「观众礼物」模块里。
 class DanmakuTab extends StatefulWidget {
   const DanmakuTab({super.key, required this.controller});
 
@@ -47,6 +52,8 @@ class _DanmakuTabState extends State<DanmakuTab> {
   void dispose() {
     _c.removeListener(_onChanged);
     _scroll.dispose();
+    // 离开弹幕页就撤掉亮屏保活，避免在其它页面也一直不熄屏。
+    if (_c.keepScreenOn) unawaited(_c.setKeepScreenOn(false));
     super.dispose();
   }
 
@@ -182,8 +189,8 @@ class _DanmakuTabState extends State<DanmakuTab> {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
       decoration: const BoxDecoration(
-        color: Color(0xFF11161D),
-        border: Border(bottom: BorderSide(color: Color(0xFF222831))),
+        color: AppColors.surface,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -230,6 +237,18 @@ class _DanmakuTabState extends State<DanmakuTab> {
                     ],
                   ],
                 ),
+                if (_c.roomId > 0) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(child: _onlineEntry(cs)),
+                    ],
+                  ),
+                ],
+                if (_c.roomId > 0) ...[
+                  const SizedBox(height: 2),
+                  _keepScreenSwitch(cs),
+                ],
               ],
             ),
           ),
@@ -259,6 +278,125 @@ class _DanmakuTabState extends State<DanmakuTab> {
     );
   }
 
+  /// 在线人数 + 礼物金额入口。人数每 30 秒刷新，与弹幕连接相互独立；
+  /// 礼物金额在收到礼物时即时累加。
+  Widget _onlineEntry(ColorScheme cs) {
+    final n = _c.audienceOnline;
+    final loading = _c.audienceLoading;
+    final text = loading && n == 0 ? '在线人数获取中…' : '在线 $n 人';
+    final gold = _c.giftSummary.totalGold;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _pill(
+          cs,
+          icon: Icons.people_alt_outlined,
+          text: text,
+          color: cs.primary,
+          onTap: _openAudience,
+        ),
+        if (gold > 0) ...[
+          const SizedBox(width: 6),
+          _pill(
+            cs,
+            icon: Icons.savings_outlined,
+            text: '礼物 ${formatYuan(_c.giftSummary.totalYuan)}',
+            color: AppColors.gift,
+            onTap: _openAudience,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 顶栏上的一个小胶囊按钮（在线人数 / 礼物金额共用）。
+  Widget _pill(
+    ColorScheme cs, {
+    required IconData icon,
+    required String text,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: .35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12.5, color: color),
+            const SizedBox(width: 5),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAudience() async {
+    // 进页面前先刷一次，保证看到的是刚拉到的数据。
+    unawaited(_c.refreshAudience());
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AudienceDetailPage(controller: _c),
+      ),
+    );
+  }
+
+  /// 亮屏保活开关：开了之后屏幕不会自动熄灭，适合挂机看弹幕。
+  /// 长时间常亮有烧屏风险，所以全局配色改成了纯黑（见 [AppColors]）。
+  Widget _keepScreenSwitch(ColorScheme cs) {
+    final on = _c.keepScreenOn;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          on ? Icons.lightbulb : Icons.lightbulb_outline,
+          size: 13,
+          color: on ? AppColors.warning : cs.outline,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          on ? '屏幕常亮' : '亮屏保活',
+          style: TextStyle(
+            fontSize: 11,
+            color: on ? AppColors.warning : cs.outline,
+            fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+        Transform.scale(
+          scale: 0.65,
+          child: Switch(
+            value: on,
+            onChanged: _toggleKeepScreen,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _toggleKeepScreen(bool v) async {
+    final ok = await _c.setKeepScreenOn(v);
+    if (!mounted) return;
+    if (v && !ok) {
+      _snack('亮屏保活开启失败（仅 Android 支持）');
+    } else if (v) {
+      _snack('已开启亮屏保活，屏幕不会自动熄灭');
+    }
+  }
+
   /// 主播头像。数据来自直播间接口；拿不到时退化为昵称首字。
   Widget _anchorAvatar(ColorScheme cs) {
     final name = _c.info?.anchorName ?? '';
@@ -268,11 +406,11 @@ class _DanmakuTabState extends State<DanmakuTab> {
       height: 42,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: const Color(0xFF1B2129),
+        color: AppColors.surfaceHighlight,
         border: Border.all(
           color: _c.state == ConnState.connected
-              ? const Color(0xFF3FB950)
-              : const Color(0xFF2A313B),
+              ? AppColors.success
+              : AppColors.border,
           width: 1.5,
         ),
       ),
@@ -284,7 +422,7 @@ class _DanmakuTabState extends State<DanmakuTab> {
                 height: 42,
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.medium,
-                errorBuilder: (_, __, ___) => _avatarFallback(cs, name),
+                errorBuilder: (_, _, _) => _avatarFallback(cs, name),
               )
             : _avatarFallback(cs, name),
       ),
@@ -448,11 +586,11 @@ class _DanmakuTabState extends State<DanmakuTab> {
 
   Widget _buildRow(ColorScheme cs, LiveEvent e) {
     final (Color color, IconData icon) = switch (e.kind) {
-      EventKind.gift => (const Color(0xFFE3B341), Icons.card_giftcard),
-      EventKind.guard => (const Color(0xFFA371F7), Icons.military_tech),
-      EventKind.superchat => (const Color(0xFFF778BA), Icons.paid),
-      EventKind.live => (const Color(0xFF3FB950), Icons.live_tv),
-      _ => (const Color(0xFFE6EDF3), Icons.chat_bubble_outline),
+      EventKind.gift => (AppColors.gift, Icons.card_giftcard),
+      EventKind.guard => (AppColors.guard, Icons.military_tech),
+      EventKind.superchat => (AppColors.superchat, Icons.paid),
+      EventKind.live => (AppColors.success, Icons.live_tv),
+      _ => (AppColors.textPrimary, Icons.chat_bubble_outline),
     };
     final textColor = (e.kind == EventKind.gift ||
             e.kind == EventKind.guard ||
@@ -461,38 +599,55 @@ class _DanmakuTabState extends State<DanmakuTab> {
         : null;
     final prefix = <InlineSpan>[];
     if (e.user.admin) {
-      prefix.add(_tagSpan('房管', const Color(0xFFF85149), filled: true));
+      prefix.add(_tagSpan('房管', AppColors.danger, filled: true));
     } else if (e.user.svip) {
-      prefix.add(_tagSpan('年度', const Color(0xFFE3B341), filled: true));
+      prefix.add(_tagSpan('年度', AppColors.gift, filled: true));
     } else if (e.user.vip) {
-      prefix.add(_tagSpan('VIP', const Color(0xFFF778BA), filled: true));
+      prefix.add(_tagSpan('VIP', AppColors.superchat, filled: true));
     }
     if (e.user.hasMedal) {
       // 粉丝勋章：按等级给 B 站风格的勋章底色
       final lv = e.user.medalLevel;
       final medalColor = lv >= 10
-          ? const Color(0xFFE3B341)
+          ? AppColors.gift
           : lv >= 7
-              ? const Color(0xFFA371F7)
+              ? AppColors.guard
               : lv >= 4
                   ? const Color(0xFF3EC2A6)
                   : const Color(0xFF4FA0E0);
       prefix.add(_tagSpan('${e.user.medalName} $lv', medalColor, filled: true));
     }
     if (e.user.level > 0) {
-      prefix.add(_tagSpan('UL${e.user.level}', const Color(0xFF6E7681)));
+      prefix.add(_tagSpan('UL${e.user.level}', AppColors.textFaint));
     }
     if (e.user.name.isNotEmpty) {
       prefix.add(TextSpan(
         text: '${e.user.name}：',
         style: const TextStyle(
-          color: Color(0xFF85B7EB),
+          color: AppColors.userName,
           fontWeight: FontWeight.w500,
         ),
       ));
     }
-    final bodyStyle = const TextStyle(
-        color: Color(0xFFE6EDF3), fontSize: 13.5, height: 1.45);
+    // 礼物行把单价也标出来（价格来自礼物面板，报文本身不带价格）。
+    if (e.kind == EventKind.gift) {
+      final id = (e.extra['gift_id'] as int?) ?? 0;
+      final name = '${e.extra['gift_name'] ?? ''}';
+      final info = _c.giftTable.lookup(id: id, name: name);
+      final num = (e.extra['count'] as int?) ?? 1;
+      if (info != null && info.isPaid) {
+        prefix.add(TextSpan(
+          text: ' ${formatYuan(info.yuan * num)}',
+          style: const TextStyle(
+            color: AppColors.gift,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ));
+      }
+    }
+    const bodyStyle = TextStyle(
+        color: AppColors.textPrimary, fontSize: 13.5, height: 1.45);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(

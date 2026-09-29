@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:bili_live_relay/room_ref.dart';
+import 'package:bili_live_relay/core/room_ref.dart';
 
 void main() {
   test('新反馈的链接：AL vs IG（赛事活动页形态）', () async {

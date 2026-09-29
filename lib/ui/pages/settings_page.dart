@@ -2,13 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'anim.dart';
-import 'blive/normalize.dart';
-import 'relay_controller.dart';
-import 'updater.dart';
+import '../anim.dart';
+import '../theme.dart';
+import '../../blive/gift.dart';
+import '../../blive/normalize.dart';
+import '../../state/relay_controller.dart';
+import '../../core/updater.dart';
 
-/// 设置（模块三）：与弹幕空间平级的独立页面，不再是弹幕页里的一个抽屉。
-/// 内容：房间信息、弹幕筛选开关、实时数据、账号（退出登录）。
+/// 设置（模块四）：与弹幕空间平级的独立页面。
+/// 内容：房间信息、弹幕筛选开关、实时数据、本场礼物、亮屏保活、账号。
 class SettingsTab extends StatefulWidget {
   const SettingsTab({
     super.key,
@@ -117,6 +119,35 @@ class _SettingsTabState extends State<SettingsTab> {
           _statRow(cs, '舰长数', stats.guard),
           _statRow(cs, '粉丝团', stats.fansClub),
           const Divider(height: 1),
+          _section(cs, '本场礼物'),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.savings_outlined,
+                size: 20, color: AppColors.gift),
+            title: const Text('礼物价值合计', style: TextStyle(fontSize: 14)),
+            subtitle: const Text('口径：本次连接期间收到的礼物',
+                style: TextStyle(fontSize: 11)),
+            trailing: Text(
+              formatYuan(_c.giftSummary.totalYuan),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.gift,
+              ),
+            ),
+          ),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.lightbulb_outline, size: 20),
+            title: const Text('亮屏保活', style: TextStyle(fontSize: 14)),
+            subtitle: const Text('开启后屏幕不自动熄灭（长时间常亮请留意烧屏）',
+                style: TextStyle(fontSize: 11)),
+            trailing: Switch(
+              value: _c.keepScreenOn,
+              onChanged: (v) => _c.setKeepScreenOn(v),
+            ),
+          ),
+          const Divider(height: 1),
           _section(cs, '关于'),
           ListTile(
             dense: true,
@@ -124,7 +155,7 @@ class _SettingsTabState extends State<SettingsTab> {
             title: const Text('检测更新', style: TextStyle(fontSize: 14)),
             subtitle: Text(
               _checking
-                  ? '正在检查 GitHub / 更新服务器…'
+                  ? '正在检查更新…'
                   : '当前版本 v$kAppVersion',
               style: const TextStyle(fontSize: 11),
             ),
@@ -159,7 +190,7 @@ class _SettingsTabState extends State<SettingsTab> {
 
   bool _checking = false;
 
-  /// 把更新说明解析成「新特性」逐条列表（兼容 GitHub 的 - 列表、
+  /// 把更新说明解析成「新特性」逐条列表（兼容 - 列表、
   /// 服务器 json 的换行 / 中文分号分隔）。
   List<Widget> _notesLines(String notes) {
     if (notes.trim().isEmpty) return const [];
@@ -224,7 +255,7 @@ class _SettingsTabState extends State<SettingsTab> {
           title: Text('正在下载 v${candidates.first.version}'),
           content: ValueListenableBuilder<double?>(
             valueListenable: progress,
-            builder: (_, p, __) => Column(
+            builder: (_, p, _) => Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -278,7 +309,7 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  /// 检测更新：GitHub 优先，其次自建服务器；发现新版本弹窗让用户选择去更新。
+  /// 检测更新：Gitee Releases 优先，其次自建服务器；发现新版本弹窗让用户选择去更新。
   Future<void> _checkUpdate() async {
     setState(() => _checking = true);
     final result = await checkForUpdate();
@@ -321,11 +352,11 @@ class _SettingsTabState extends State<SettingsTab> {
       duration: const Duration(seconds: 2),
       content: Text(result.reached
           ? '已是最新版本 v$kAppVersion'
-          : '检测失败：GitHub 与更新服务器都无法连接'),
+          : '检测失败：无法连接更新服务器，请检查网络'),
     ));
   }
 
-  /// 退出登录：先把内存里的弹幕记录落盘，再通知闸门清除登录态。
+  /// 退出登录：先撤掉亮屏保活，再通知闸门清除登录态。
   void _confirmLogout() {
     showDialog<void>(
       context: context,
@@ -340,7 +371,8 @@ class _SettingsTabState extends State<SettingsTab> {
           FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await _c.flushLog();
+              // 亮屏保活是进程级的窗口标志，退出登录前必须撤掉。
+              if (_c.keepScreenOn) await _c.setKeepScreenOn(false);
               widget.onLogout?.call();
             },
             child: const Text('退出'),

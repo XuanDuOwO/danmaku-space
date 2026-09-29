@@ -109,7 +109,7 @@ Map<String, String>? _parseEmoticons(List<dynamic> info) {
     var token = v['emoji'];
     if (token is! String || token.isEmpty) token = k is String ? k : null;
     if (token is! String || token.isEmpty) return;
-    map[token] = url as String;
+    map[token] = url;
     // 再去括号存一份，兼容不带中括号的占位符。
     if (token.startsWith('[') && token.endsWith(']') && token.length > 2) {
       map[token.substring(1, token.length - 1)] = url;
@@ -133,14 +133,6 @@ dynamic digging(dynamic obj, List<int> path, {dynamic fallback}) {
     if (cur == null) return fallback;
   }
   return cur;
-}
-
-LiveUser _userFromPb(Map<int, dynamic> pb,
-    {int uidPath = 1, int namePath = 2, int facePath = 3}) {
-  final face = pbGet(pb, [facePath], defaultValue: '') as String? ?? '';
-  final name = pbGet(pb, [namePath], defaultValue: '') as String? ?? '匿名';
-  final uid = pbGet(pb, [uidPath], defaultValue: 0) as int? ?? 0;
-  return LiveUser(uid: uid, name: name, face: face is String ? face : '');
 }
 
 LiveEvent _danmaku(Map<String, dynamic> j) {
@@ -175,6 +167,16 @@ LiveEvent _danmaku(Map<String, dynamic> j) {
 }
 
 /// 礼物：新版 SEND_GIFT_V2 已改 protobuf，旧版 SEND_GIFT 仍是明文。
+///
+/// 关于**价格**：实测（2026-09）弹幕流里的礼物报文**不可靠地携带价格** ——
+/// 新版 protobuf 的 `gift[5]` 偶尔有值、偶尔缺失，旧版明文的 `data.price`
+/// 也只是 B站自己给的两个不同口径之一。所以计价一律以礼物面板接口
+/// （`roomGiftConfig`）为权威来源，这里只负责把 **gift_id / 名称 / 数量**
+/// 带出去，交给 [GiftTable] 换算。
+///
+/// 关于**数量**：实测连击时 `gift[3]`（num）是**本批增量**而不是累计值
+/// ——同一个 combo_id 连续出现 num=1,1,1,1 时总数量就是 4。
+/// 因此这里原样透出 num，由累加器直接相加即可，不需要去重。
 LiveEvent _gift(Map<String, dynamic> j) {
   final d = (j['data'] as Map<String, dynamic>?) ?? const {};
   final cmd = (j['cmd'] as String?) ?? 'SEND_GIFT';
@@ -197,7 +199,10 @@ LiveEvent _gift(Map<String, dynamic> j) {
       cmd: cmd,
       ts: sec > 0 ? sec * 1000 : _nowMs(),
       user: LiveUser(
-        uid: pbGet(pb, [34, 1], defaultValue: 0) as int? ?? 0,
+        // 实测 uid 在 pb[1]，而不是早先以为的 pb[34][1]（那里是别的 id）。
+        uid: (pbGet(pb, [1], defaultValue: 0) as int?) ??
+            (pbGet(pb, [34, 1], defaultValue: 0) as int?) ??
+            0,
         name: name,
         face: pbGet(pb, [3], defaultValue: '') as String? ?? '',
       ),
@@ -226,6 +231,7 @@ LiveEvent _gift(Map<String, dynamic> j) {
       'count': count,
       'price': (d['price'] as int?) ?? 0,
       'coin_type': (d['coin_type'] as String?) ?? '',
+      'gift_id': (d['gift_id'] as int?) ?? (d['giftId'] as int?) ?? 0,
     },
   );
 }

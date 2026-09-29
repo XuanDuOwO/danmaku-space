@@ -1,22 +1,24 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
-import 'danmaku_page.dart';
-import 'home_page.dart';
-import 'log_page.dart';
-import 'relay_controller.dart';
-import 'settings_page.dart';
+import 'pages/danmaku_page.dart';
+import 'pages/gift_page.dart';
+import 'pages/home_page.dart';
+import 'pages/settings_page.dart';
+import '../state/relay_controller.dart';
+import 'theme.dart';
 
-/// 应用外壳：底部导航承载**四个彼此独立、平级**的模块。
+/// 应用外壳：底部导航承载**三个彼此独立、平级**的模块。
 ///
 ///   传送门   —— 怎么进直播间（房间号 / 分享链接 / 收藏）
-///   弹幕空间 —— 当前房间的实时弹幕
+///   弹幕空间 —— 当前房间的实时弹幕 + 在线人数 + 礼物价值
+///   观众礼物 —— 实时观众（在线人数 / 高能榜）与本场礼物价值汇总
 ///   设置     —— 筛选、实时数据、账号
-///   弹幕记录 —— 按直播间分类的历史弹幕
 ///
 /// 页面之间支持**左右滑动切换**（PageView + KeepAlive，状态不丢）。
 /// 弹幕空间进入全屏模式时：隐藏底部导航、禁用滑动，返回键退出全屏。
+///
+/// 弹幕记录模块已整体移除：按天把每条弹幕写进 SharedPreferences 需要
+/// 每 5 秒重写整天 JSON，房间一热闹就是持续的重 IO，收益不成正比。
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
@@ -40,16 +42,29 @@ class _AppShellState extends State<AppShell> {
   int _tab = 0;
   bool _ready = false;
 
+  /// 记住上次的全屏状态，只有它变了才重建外壳。
+  /// 早先是「任何 notifyListeners 都 setState」，房间里每秒几十条弹幕
+  /// 会把整个外壳连同四个页面一起重建，纯浪费。
+  bool _lastFullscreen = false;
+
+  /// 弹幕空间是第几个 tab（全屏逻辑只对它生效）。
+  static const int _danmakuTab = 1;
+
   @override
   void initState() {
     super.initState();
+    _lastFullscreen = _c.danmakuFullscreen;
     _c.addListener(_onCtrl);
     _boot();
   }
 
   void _onCtrl() {
-    // 弹幕空间全屏状态等变化时重建外壳（隐藏/恢复底栏）
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final fs = _c.danmakuFullscreen;
+    if (fs != _lastFullscreen) {
+      _lastFullscreen = fs;
+      setState(() {});
+    }
   }
 
   Future<void> _boot() async {
@@ -71,22 +86,23 @@ class _AppShellState extends State<AppShell> {
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
     );
-    // 切到弹幕记录页前先把内存里攒着的弹幕落盘，保证看到的是完整的。
-    if (i == 3) unawaited(_c.flushLog());
   }
 
   /// 传送门选定房间：连上并跳到弹幕空间模块。
   Future<void> _enterRoom(int roomId) async {
-    if (mounted) _go(1);
+    if (mounted) _go(_danmakuTab);
     await _c.connect(roomId);
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_ready) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        backgroundColor: AppColors.background,
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
-    final fullscreen = _c.danmakuFullscreen && _tab == 1;
+    final fullscreen = _c.danmakuFullscreen && _tab == _danmakuTab;
     return PopScope(
       // 弹幕空间全屏时：返回键不退出应用，而是退出全屏
       canPop: !fullscreen,
@@ -96,6 +112,7 @@ class _AppShellState extends State<AppShell> {
         }
       },
       child: Scaffold(
+        backgroundColor: AppColors.background,
         // 全屏时隐藏底部导航
         bottomNavigationBar: fullscreen
             ? null
@@ -116,14 +133,14 @@ class _AppShellState extends State<AppShell> {
                     label: '弹幕空间',
                   ),
                   NavigationDestination(
+                    icon: Icon(Icons.card_giftcard_outlined),
+                    selectedIcon: Icon(Icons.card_giftcard),
+                    label: '观众礼物',
+                  ),
+                  NavigationDestination(
                     icon: Icon(Icons.settings_outlined),
                     selectedIcon: Icon(Icons.settings),
                     label: '设置',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.receipt_long_outlined),
-                    selectedIcon: Icon(Icons.receipt_long),
-                    label: '弹幕记录',
                   ),
                 ],
               ),
@@ -133,7 +150,10 @@ class _AppShellState extends State<AppShell> {
           physics: fullscreen ? const NeverScrollableScrollPhysics() : null,
           onPageChanged: (i) {
             setState(() => _tab = i);
-            if (i == 3) unawaited(_c.flushLog());
+            // 离开弹幕空间就关掉亮屏保活，避免用户在别的页面挂机时屏幕不灭。
+            if (i != _danmakuTab && _c.keepScreenOn) {
+              _c.setKeepScreenOn(false);
+            }
           },
           children: [
             _KeepAlive(
@@ -145,10 +165,10 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             _KeepAlive(child: DanmakuTab(controller: _c)),
+            _KeepAlive(child: GiftTab(controller: _c)),
             _KeepAlive(
               child: SettingsTab(controller: _c, onLogout: widget.onLogout),
             ),
-            _KeepAlive(child: LogTab(controller: _c, active: _tab == 3)),
           ],
         ),
       ),

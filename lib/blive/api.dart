@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'audience.dart';
+import 'gift.dart';
 import 'wbi.dart';
 
 /// B站 HTTP 接口封装：身份初始化、房间解析、弹幕凭据获取
@@ -28,6 +30,14 @@ const String _apiNav = '$_mainBase/x/web-interface/nav';
 /// 与服务端下发的 info[0][15].extra.emots 互补，二者都不依赖第三方数据。
 const String _apiEmoticons =
     '$_apiBase/xlive/web-ucenter/v2/emoticon/GetEmoticons';
+/// 直播间在线人数 + 高能榜（带观众头像）。匿名可读，不需要登录态。
+/// 注意必须传主播 uid 作为 ruid，传房间号只会拿到空榜。
+const String _apiOnlineRank =
+    '$_apiBase/xlive/general-interface/v1/rank/getOnlineGoldRank';
+/// 礼物面板：id → 名称 / 单价（金瓜子）。弹幕报文里只带礼物名，
+/// 不带价格，所以要靠这张表把礼物换算成钱。
+const String _apiGiftPanel =
+    '$_apiBase/xlive/web-room/v1/giftPanel/roomGiftConfig';
 const String _apiQrGenerate =
     'https://passport.bilibili.com/x/passport-login/web/qrcode/generate';
 const String _apiQrPoll =
@@ -109,10 +119,10 @@ class BilibiliApi {
   /// [cookie] 登录态（含 SESSDATA）。带登录态才能解除弹幕用户名脱敏，
   /// 游客身份拿到的昵称会显示成 `j***`。
   BilibiliApi({String cookie = '', http.Client? client})
-      : _cookie = cookie,
+      : _cookie = cookie.trim(),
         _client = client ?? http.Client();
 
-  String _cookie;
+  final String _cookie;
   final http.Client _client;
 
   String buvid3 = '';
@@ -123,9 +133,6 @@ class BilibiliApi {
   String _imgKey = '';
   String _subKey = '';
   int _wbiFetchedAt = 0;
-
-  String get cookie => _cookie;
-  set cookie(String v) => _cookie = v;
 
   String get cookieHeader {
     final parts = <String>[
@@ -304,6 +311,78 @@ class BilibiliApi {
     );
   }
 
+  /// 直播间在线人数 + 高能榜（观众头像列表）。
+  ///
+  /// [ruid] 必须是**主播 uid**，不是房间号 —— 传房间号服务端只回空榜。
+  /// 房间号与主播 uid 的对应关系由 [roomInit] 缓存，调用方只需给房间号。
+  ///
+  /// 榜单只收录「有贡献值」的观众（投喂 / 点赞 / 发弹幕），
+  /// 所以 [AudienceSnapshot.members] 的条数通常**少于**
+  /// [AudienceSnapshot.online]，这是接口本身的定义，不是解析丢数据。
+  Future<AudienceSnapshot> getOnlineAudience(
+    int roomId, {
+    int page = 1,
+    int pageSize = audiencePageSize,
+  }) async {
+    if (roomId <= 0) return AudienceSnapshot.empty;
+    // 缺 buvid 时该接口偶发空包，先补齐设备指纹（内部有缓存，不会每次都请求）。
+    await ensureBuvid();
+    final ruid = await _anchorUid(roomId);
+    final data = await _getJson(
+      _apiOnlineRank,
+      params: {
+        'ruid': '$ruid',
+        'roomId': '$roomId',
+        'page': '$page',
+        'pageSize': '$pageSize',
+      },
+      // 高能榜在未开播 / 无榜单时可能回 -400 等业务码，
+      // 视为「没有数据」而不是错误，避免打断弹幕主链路。
+      allowedCodes: const {-400, -404, -352},
+    );
+    return parseAudienceSnapshot(data, page: page, pageSize: pageSize);
+  }
+
+  /// 房间号 → 主播 uid，按房间缓存（一个房间的主播不会变）。
+  final Map<int, int> _anchorUidCache = {};
+
+  Future<int> _anchorUid(int roomId) async {
+    final hit = _anchorUidCache[roomId];
+    if (hit != null && hit > 0) return hit;
+    final init = await roomInit(roomId);
+    final uid = (init['uid'] as int?) ?? 0;
+    // 拿不到真实 uid 时退回房间号：接口会回空榜，但不会抛异常。
+    final real = uid > 0 ? uid : roomId;
+    _anchorUidCache[roomId] = real;
+    return real;
+  }
+
+  /// 拉取礼物面板价格表（id → 名称 / 单价）。
+  ///
+  /// 弹幕流里的礼物报文**不带价格**，必须靠这张表换算金额。
+  /// 面板很大（实测 1.5 MB / 694 项），所以按房间缓存，一次连接只拉一次。
+  Future<GiftTable> fetchGiftPanel(int roomId) async {
+    if (roomId <= 0) return GiftTable.empty;
+    final cached = _giftTableCache[roomId];
+    if (cached != null) return cached;
+    await ensureBuvid();
+    final data = await _getJson(
+      _apiGiftPanel,
+      params: {
+        'platform': 'pc',
+        'room_id': '$roomId',
+        'area_id': '0',
+        'parent_area_id': '0',
+      },
+      allowedCodes: const {-400, -404, -352, -101},
+    );
+    final table = GiftTable.parse(data);
+    if (!table.isEmpty) _giftTableCache[roomId] = table;
+    return table;
+  }
+
+  final Map<int, GiftTable> _giftTableCache = {};
+
   /// 拉取直播间可用的表情包，返回 [token] → 图片 URL。
   ///
   /// 这是直播间接口下发的真实数据，作为 [info[0][15].extra.emots] 的补充：
@@ -331,7 +410,7 @@ class BilibiliApi {
         if (tok is! String || tok.isEmpty) continue;
         if (url is! String || url.isEmpty) continue;
         if (url.startsWith('http://')) url = 'https://${url.substring(7)}';
-        out['[$tok]'] = url as String;
+        out['[$tok]'] = url;
       }
     }
     return out;

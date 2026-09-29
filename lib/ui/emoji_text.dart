@@ -89,7 +89,7 @@ WidgetSpan _emoteSpan(
         height: height,
         fit: BoxFit.contain,
         filterQuality: FilterQuality.medium,
-        errorBuilder: (_, __, ___) => Text(fallback, style: style),
+        errorBuilder: (_, _, _) => Text(fallback, style: style),
       ),
     ),
   );
