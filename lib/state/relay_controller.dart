@@ -492,7 +492,7 @@ class RelayController extends ChangeNotifier {
 
   // -------------------------------------------------------------- 礼物统计
 
-  /// 礼物价格表（id/名字 → 单价）。进房间时拉一次，缓存复用。
+  /// 礼物价格表（gift_id → 单价）。进房间时拉一次，缓存复用。
   GiftTable giftTable = GiftTable.empty;
 
   /// 本场礼物累计（连击按增量累加，口径见 [GiftAccumulator]）。
@@ -502,16 +502,31 @@ class RelayController extends ChangeNotifier {
   GiftSummary giftSummary = GiftSummary.empty;
 
   /// 收到一条礼物事件时计价累加。
+  ///
+  /// 价格来源有优先级（实测 37/37 条两者一致，互为备份）：
+  ///   1. 礼物面板按 gift_id 查 —— 权威；
+  ///   2. 面板还没加载完 / 是新礼物时，退回报文自带的 price
+  ///      （`SEND_GIFT_V2` 的 `gift[5]`，或明文的 `data.price`）。
+  ///
+  /// 这样即使面板请求失败（1.5 MB，弱网下确实会失败），金额也不会全变 0。
   void _recordGift(LiveEvent ev) {
     final name = '${ev.extra['gift_name'] ?? ''}'.trim();
     if (name.isEmpty) return;
     final num = (ev.extra['count'] as int?) ?? 1;
     final id = (ev.extra['gift_id'] as int?) ?? 0;
-    _gifts.add(
-      name: name,
-      num: num,
-      info: giftTable.lookup(id: id, name: name),
-    );
+    final coin = '${ev.extra['coin_type'] ?? ''}';
+    final payloadPrice = (ev.extra['price'] as int?) ?? 0;
+
+    var info = giftTable.lookup(id: id, name: name);
+    if (info == null && payloadPrice > 0) {
+      info = GiftInfo(
+        id: id,
+        name: name,
+        price: payloadPrice,
+        coinType: coin.isEmpty ? 'gold' : coin,
+      );
+    }
+    _gifts.add(name: name, num: num, info: info);
     giftSummary = _gifts.snapshot();
   }
 

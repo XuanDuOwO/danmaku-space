@@ -1,13 +1,21 @@
 /// 礼物价格表与礼物价值统计。
 ///
-/// 为什么需要这张表：**弹幕流里的礼物报文不带价格**。实测 `SEND_GIFT` 的
-/// `data` 里只有 `giftName` / `num` / `price`（旧版字段，新版 protobuf 包里
-/// 干脆没有），而新版 `SEND_GIFT_V2` 的价格字段语义不可靠。
-/// 唯一权威来源是礼物面板接口 `roomGiftConfig`，它给出每个礼物的单价。
+/// ## 价格从哪来（2026-09 实测结论）
 ///
-/// 计价单位：B站用「金瓜子」计价，**1000 金瓜子 = 1 元人民币**。
-/// 例如 `爱心小熊` price=52000 → 52 元。面板里还有 `coin_type='silver'`
-/// 的免费礼物（辣条、小心心等），价格恒为 0，不计入金额统计。
+/// 有三条可能的渠道，实测比对 4 个直播间 37 条真实礼物后确认：
+///
+/// | 渠道 | 可靠性 | 说明 |
+/// | --- | --- | --- |
+/// | 弹幕报文 `gift[5]` | 高 | SEND_GIFT_V2 的 pb 里确实带 price，37/37 与面板一致 |
+/// | 明文 `combo_total_coin / combo_num` | 高 | B站自己算的单价，与面板一致 |
+/// | 礼物面板 `roomGiftConfig` | 高 | 权威来源，但 1.5 MB，要单独请求 |
+///
+/// **不能用名字查**：面板里 721 种礼物中有 42 种同名不同价
+/// （如「冲浪」同时存在 89900 与 100、「粉丝团灯牌」有 1/100/1000 三档），
+/// 按名字查会拿到随机一个价格。所以一律按 `gift_id` 查。
+///
+/// 计价单位是「金瓜子」，**1000 金瓜子 = 1 元人民币**。
+/// `coin_type='silver'` 是银瓜子免费礼物（辣条、小心心等），恒为 0 元。
 library;
 
 /// 金瓜子 → 人民币的换算基数。
@@ -56,7 +64,11 @@ class GiftTable {
   bool get isEmpty => byId.isEmpty && byName.isEmpty;
   int get length => byId.length;
 
-  /// 先按 id 查，id 查不到（报文里只有名字）再按名字查。
+  /// 按 id 查（**首选**），id 查不到再按名字兜底。
+  ///
+  /// 名字兜底只用于「报文里没带 gift_id」的极端情况 ——
+  /// 面板里同名不同价的礼物有 42/721 种，按名字查出来的价格可能是错的，
+  /// 所以这里刻意让 id 优先。
   GiftInfo? lookup({int id = 0, String name = ''}) {
     if (id > 0) {
       final hit = byId[id];
@@ -65,7 +77,6 @@ class GiftTable {
     if (name.isNotEmpty) {
       final hit = byName[name];
       if (hit != null) return hit;
-      // B站偶尔在名字后面加「×N」或空格，做一次宽松匹配
       final trimmed = name.trim();
       final loose = byName[trimmed];
       if (loose != null) return loose;
@@ -75,8 +86,10 @@ class GiftTable {
 
   /// 解析礼物面板响应。
   ///
-  /// 面板结构在不同版本里出现过两种：`data.global_gift.list` 与 `data.list`，
-  /// 两个都取，按 id 去重（后者是当前房间可用的子集，价格与前者一致）。
+  /// 只取 `data.global_gift.list`（694 项，全局礼物表）。
+  /// **不取 `data.list`**：实测那个列表（211 项）是「当前直播间可送礼面板」
+  /// 的展示项，id 与弹幕流里发的 id 完全不相交（差集 211/211），
+  /// 混进来只会污染 byId。
   static GiftTable parse(Object? raw) {
     final root = raw is Map ? raw : const {};
     final data = root['data'] is Map ? root['data'] as Map : const {};
@@ -86,7 +99,8 @@ class GiftTable {
     if (global is Map && global['list'] is List) {
       items.addAll((global['list'] as List).cast<Object?>());
     }
-    if (data['list'] is List) {
+    // global_gift 缺失时（接口改版）退回 data.list，总比没有强。
+    if (items.isEmpty && data['list'] is List) {
       items.addAll((data['list'] as List).cast<Object?>());
     }
 

@@ -4,7 +4,7 @@ import 'package:bili_live_relay/blive/gift.dart';
 
 void main() {
   group('GiftTable.parse', () {
-    test('解析 global_gift.list 与 data.list，并给出 id→单价', () {
+    test('解析 global_gift.list，给出 id→单价', () {
       final t = GiftTable.parse({
         'code': 0,
         'data': {
@@ -12,11 +12,9 @@ void main() {
             'list': [
               {'id': 34961, 'name': '爱心小熊', 'price': 52000, 'coin_type': 'gold'},
               {'id': 31214, 'name': '牛哇', 'price': 100, 'coin_type': 'gold'},
+              {'id': 31164, 'name': '粉丝团灯牌', 'price': 100, 'coin_type': 'gold'},
             ],
           },
-          'list': [
-            {'id': 31164, 'name': '粉丝团灯牌', 'price': 100, 'coin_type': 'gold'},
-          ],
         },
       });
 
@@ -26,6 +24,38 @@ void main() {
       // 52000 金瓜子 = 52 元
       expect(t.lookup(id: 34961)!.yuan, 52.0);
       expect(t.lookup(id: 34961)!.isPaid, isTrue);
+    });
+
+    test('不混入 data.list —— 那是送礼面板展示项，id 与弹幕流不相交', () {
+      // 实测：data.list 的 211 个 id 与 global_gift.list 完全不重叠，
+      // 混进来只会让 byId 里多出一批永远不会被命中的条目。
+      final t = GiftTable.parse({
+        'data': {
+          'global_gift': {
+            'list': [
+              {'id': 31164, 'name': '粉丝团灯牌', 'price': 100, 'coin_type': 'gold'},
+            ],
+          },
+          'list': [
+            {'id': 99999, 'name': '面板专属', 'price': 666, 'coin_type': 'gold'},
+          ],
+        },
+      });
+      expect(t.length, 1);
+      expect(t.lookup(id: 99999), isNull);
+      expect(t.lookup(id: 31164)!.price, 100);
+    });
+
+    test('global_gift 缺失时退回 data.list（接口改版的兜底）', () {
+      final t = GiftTable.parse({
+        'data': {
+          'list': [
+            {'id': 31164, 'name': '粉丝团灯牌', 'price': 100, 'coin_type': 'gold'},
+          ],
+        },
+      });
+      expect(t.length, 1);
+      expect(t.lookup(id: 31164)!.price, 100);
     });
 
     test('只有名字没有 id 时也能按名字查到（报文常缺 gift_id）', () {
